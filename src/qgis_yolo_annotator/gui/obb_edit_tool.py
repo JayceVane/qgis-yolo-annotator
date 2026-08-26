@@ -8,10 +8,13 @@
     边中点手柄：沿该边法向单轴伸缩（对边固定，角度不变）
     内部：整体平移
 
+场景感知：鼠标移出当前场景边界自动切换为平移模式（抓手，左键拖拽平移），
+回到场景内恢复绘制/编辑；无需手动切工具。
+
 快捷键：
-    Space 按住 + 左键拖拽：平移画布
+    Space 按住 + 左键拖拽：平移画布（场景内也可用）
     数字/字母（类别 hotkey）改选中类别；Del 删除；Esc 取消；
-    方向键微调（Shift=快速）；Ctrl+C/V 复制粘贴
+    方向键微调（Shift=快速）；Ctrl+C/V 复制粘贴；Ctrl+Z/Y 撤销重做
 """
 
 from __future__ import annotations
@@ -86,6 +89,8 @@ class ObbEditTool(QgsMapTool):
         self._space_held: bool = False
         self._panning: bool = False
         self._pan_last_pos = None  # QPoint（屏幕像素锚点）
+        # 场景感知：出场景自动转平移
+        self._outside: bool = False
 
     # ------------------------------------------------------------------ 工具公共
 
@@ -95,12 +100,13 @@ class ObbEditTool(QgsMapTool):
 
     def canvasPressEvent(self, e):
         if e.button() == Qt.MouseButton.RightButton:
-            self._handle_context_menu(e)
+            if not self._outside:  # 场景外右键不弹菜单（此时是平移模式）
+                self._handle_context_menu(e)
             return
         if e.button() != Qt.MouseButton.LeftButton:
             return
-        # Space 按住 + 左键拖拽 = 平移画布
-        if self._space_held:
+        # Space 按住 / 场景外：左键拖拽 = 平移画布
+        if self._space_held or self._outside:
             self._panning = True
             self._pan_last_pos = e.pos()
             self.canvas().setCursor(self._make_closed_hand_cursor())
@@ -116,7 +122,14 @@ class ObbEditTool(QgsMapTool):
             self._finish_draw(point)
 
     def canvasMoveEvent(self, e):
-        # Space 平移：跟随鼠标增量移动画布中心（屏幕 y 向下 → 地图 y 向上取反）
+        point = self.toMapCoordinates(e.pos())
+        self._last_cursor_pos = point
+        # 场景感知：进出场景边界切换 平移/标注 模式
+        boundary = self._scene_boundary()
+        outside = boundary is not None and not boundary.contains(point)
+        if outside != self._outside:
+            self._set_outside(outside)
+        # 平移（Space 或 场景外拖拽）：跟随鼠标增量移动画布中心
         if self._panning and self._pan_last_pos is not None:
             pos = e.pos()
             dx = pos.x() - self._pan_last_pos.x()
@@ -129,8 +142,6 @@ class ObbEditTool(QgsMapTool):
             )
             self.canvas().refresh()
             return
-        point = self.toMapCoordinates(e.pos())
-        self._last_cursor_pos = point
         if self._state == "drawing_edge" and self._p0 is not None:
             self._p1 = self._apply_snap(self._p0, point, e.modifiers())
             self._line_hint.reset(Qgis.GeometryType.Line)
@@ -142,7 +153,7 @@ class ObbEditTool(QgsMapTool):
         elif self._state == "idle":
             if self._edit_mode is not None:
                 self._apply_edit_drag(point)
-            elif self._selected_fid is not None and not self._space_held:
+            elif self._selected_fid is not None and not self._space_held and not self._outside:
                 self._update_hover_cursor(point)
 
     def canvasReleaseEvent(self, e):
@@ -151,10 +162,70 @@ class ObbEditTool(QgsMapTool):
         if self._panning:
             self._panning = False
             self._pan_last_pos = None
-            self.canvas().setCursor(self._make_open_hand_cursor())
+            if self._space_held or self._outside:
+                self.canvas().setCursor(self._make_open_hand_cursor())
+            else:
+                self.canvas().setCursor(self._make_cross_cursor())
             return
         if self._edit_mode is not None:
             self._commit_edit()
+
+    # ------------------------------------------------------------------ 场景感知
+
+    def _scene_boundary(self):
+        """当前场景（或影像全域）在画布 CRS 下的边界矩形；无上下文返回 None。"""
+        ctrl = self.controller
+        from qgis.core import (
+            QgsCoordinateReferenceSystem,
+            QgsCoordinateTransform,
+            QgsProject,
+            QgsRectangle,
+        )
+
+        canvas_crs = self.canvas().mapSettings().destinationCrs()
+
+        def to_canvas(rect: QgsRectangle, wkt: str | None):
+            if wkt is None:
+                return rect
+            src = QgsCoordinateReferenceSystem(wkt)
+            if not src.isValid() or src == canvas_crs:
+                return rect
+            try:
+                return QgsCoordinateTransform(
+                    src, canvas_crs, QgsProject.instance()
+                ).transformBoundingBox(rect)
+            except Exception:  # noqa: BLE001  变换失败按原坐标使用
+                return rect
+
+        scene = ctrl.current_scene
+        if scene is not None and scene.kind == "xyz" and scene.map_bbox:
+            return to_canvas(QgsRectangle(*scene.map_bbox), ctrl._web_mercator_wkt())
+        if scene is not None and ctrl.raster is not None:
+            x0, y0 = ctrl.raster.pixel_to_map(scene.bbox[0], scene.bbox[1])
+            x1, y1 = ctrl.raster.pixel_to_map(scene.bbox[2], scene.bbox[3])
+            rect = QgsRectangle(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+            return to_canvas(rect, ctrl.raster.crs_wkt)
+        if ctrl.raster is not None:
+            # 无活动场景：以整幅影像为界（影像外 = 平移区）
+            x0, y0 = ctrl.raster.pixel_to_map(0, 0)
+            x1, y1 = ctrl.raster.pixel_to_map(ctrl.raster.width, ctrl.raster.height)
+            rect = QgsRectangle(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+            return to_canvas(rect, ctrl.raster.crs_wkt)
+        return None
+
+    def _set_outside(self, outside: bool):
+        """进出场景边界时的模式切换：外=平移（并中断进行中的绘制/编辑）。"""
+        self._outside = outside
+        if outside:
+            if self._state != "idle":
+                self._reset_interaction()
+            if self._edit_mode is not None:
+                self._commit_edit()
+            if not self._space_held:
+                self.canvas().setCursor(self._make_open_hand_cursor())
+        else:
+            if not self._space_held:
+                self.canvas().setCursor(self._make_cross_cursor())
 
     def _handle_context_menu(self, e):
         """右键：绘制中取消；否则命中/沿用选中目标并弹出类别修改菜单。"""
