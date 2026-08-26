@@ -450,7 +450,8 @@ class MainDock(QWidget):
 
     def _on_tree_double_click(self, item: QTreeWidgetItem, _column: int):
         image_path = item.data(0, Qt.ItemDataRole.UserRole)
-        if not image_path:
+        # 场景行（scene:: 编码）由单击导航处理，双击忽略
+        if not image_path or str(image_path).startswith("scene::"):
             return
         try:
             if image_path.startswith("xyz://"):
