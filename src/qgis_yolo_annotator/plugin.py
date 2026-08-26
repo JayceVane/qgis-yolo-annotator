@@ -17,7 +17,9 @@ class YoloAnnotatorPlugin:
         self._action: QAction | None = None
 
     def initGui(self):  # noqa: N802  QGIS 约定的初始化回调
-        """QGIS 加载插件时创建 UI 入口。"""
+        """QGIS 加载插件时创建 UI 入口（幂等：重复调用不产生双入口）。"""
+        if self._action is not None:
+            return
         self._action = QAction(QIcon(), "YOLO 智能标注", self.iface.mainWindow())
         self._action.setToolTip("打开 YOLO 智能标注面板")
         self._action.setCheckable(True)
@@ -41,10 +43,22 @@ class YoloAnnotatorPlugin:
 
     def _toggle_dock(self, checked: bool):
         if self._dock is None:
-            self._panel = MainDock(self.iface)
-            self._dock = QDockWidget("YOLO 智能标注", self.iface.mainWindow())
-            self._dock.setObjectName("YoloAnnotatorDock")
-            self._dock.setWidget(self._panel)
-            self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._dock)
+            # 复用已存在的同名 dock（如 QGIS 会话恢复产生的），避免双面板
+            from qgis.PyQt.QtWidgets import QDockWidget
+
+            existing = self.iface.mainWindow().findChild(
+                QDockWidget, "YoloAnnotatorDock"
+            )
+            if existing is not None:
+                self._dock = existing
+                self._panel = existing.widget()
+            else:
+                self._panel = MainDock(self.iface)
+                self._dock = QDockWidget("YOLO 智能标注", self.iface.mainWindow())
+                self._dock.setObjectName("YoloAnnotatorDock")
+                self._dock.setWidget(self._panel)
+                self.iface.addDockWidget(
+                    Qt.DockWidgetArea.RightDockWidgetArea, self._dock
+                )
             self._dock.visibilityChanged.connect(self._action.setChecked)
         self._dock.setVisible(checked)
