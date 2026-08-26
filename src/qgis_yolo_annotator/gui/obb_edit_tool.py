@@ -4,12 +4,14 @@
     左键定首角点 → 拖拽定长边（Shift=15° 吸附）→ 左键 → 拖拽定宽度 → 左键完成
 
 编辑（点击命中已选 OBB 后拖拽）：
-    角点手柄：平行四边形约束拖动（对角固定，邻点沿边滑动 → 天然支持旋转/变长短）
-    边中点手柄：沿法向单轴伸缩（角度不变）
+    角点手柄：旋转 + 等比缩放（对角固定，对角线跟随鼠标，长宽比锁定）
+    边中点手柄：沿该边法向单轴伸缩（对边固定，角度不变）
     内部：整体平移
 
 快捷键：
-    数字/字母（类别 hotkey）改选中类别；Del 删除；Esc 取消；方向键微调（像素步长）
+    Space 按住 + 左键拖拽：平移画布
+    数字/字母（类别 hotkey）改选中类别；Del 删除；Esc 取消；
+    方向键微调（Shift=快速）；Ctrl+C/V 复制粘贴
 """
 
 from __future__ import annotations
@@ -78,6 +80,10 @@ class ObbEditTool(QgsMapTool):
         self._handles: list[QgsVertexMarker] = []
         self._copied_pts: list[QgsPointXY] | None = None
         self._last_cursor_pos: QgsPointXY | None = None
+        # Space 平移状态
+        self._space_held: bool = False
+        self._panning: bool = False
+        self._pan_last_pos = None  # QPoint（屏幕像素锚点）
 
     # ------------------------------------------------------------------ 工具公共
 
@@ -85,7 +91,42 @@ class ObbEditTool(QgsMapTool):
         self._reset_interaction()
         super().deactivate()
 
+    def canvasPressEvent(self, e):
+        if e.button() == Qt.MouseButton.RightButton:
+            self._handle_context_menu(e)
+            return
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        # Space 按住 + 左键拖拽 = 平移画布
+        if self._space_held:
+            self._panning = True
+            self._pan_last_pos = e.pos()
+            self.canvas().setCursor(self._make_closed_hand_cursor())
+            return
+        point = self.toMapCoordinates(e.pos())
+        if self._state == "idle":
+            self._handle_idle_click(point, e.modifiers())
+        elif self._state == "drawing_edge":
+            self._p1 = self._apply_snap(self._p0, point, e.modifiers())
+            self._state = "drawing_width"
+            self._line_hint.reset(Qgis.GeometryType.Line)
+        elif self._state == "drawing_width":
+            self._finish_draw(point)
+
     def canvasMoveEvent(self, e):
+        # Space 平移：跟随鼠标增量移动画布中心（屏幕 y 向下 → 地图 y 向上取反）
+        if self._panning and self._pan_last_pos is not None:
+            pos = e.pos()
+            dx = pos.x() - self._pan_last_pos.x()
+            dy = pos.y() - self._pan_last_pos.y()
+            self._pan_last_pos = pos
+            mupp = self.canvas().mapSettings().mapUnitsPerPixel()
+            center = self.canvas().center()
+            self.canvas().setCenter(
+                QgsPointXY(center.x() - dx * mupp, center.y() + dy * mupp)
+            )
+            self.canvas().refresh()
+            return
         point = self.toMapCoordinates(e.pos())
         self._last_cursor_pos = point
         if self._state == "drawing_edge" and self._p0 is not None:
@@ -99,26 +140,18 @@ class ObbEditTool(QgsMapTool):
         elif self._state == "idle":
             if self._edit_mode is not None:
                 self._apply_edit_drag(point)
-            elif self._selected_fid is not None:
+            elif self._selected_fid is not None and not self._space_held:
                 self._update_hover_cursor(point)
 
-    def canvasPressEvent(self, e):
-        if e.button() != Qt.MouseButton.LeftButton:
-            if e.button() == Qt.MouseButton.RightButton:
-                self._handle_context_menu(e)
-            return
-        point = self.toMapCoordinates(e.pos())
-        if self._state == "idle":
-            self._handle_idle_click(point, e.modifiers())
-        elif self._state == "drawing_edge":
-            self._p1 = self._apply_snap(self._p0, point, e.modifiers())
-            self._state = "drawing_width"
-            self._line_hint.reset(Qgis.GeometryType.Line)
-        elif self._state == "drawing_width":
-            self._finish_draw(point)
-
     def canvasReleaseEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton and self._edit_mode is not None:
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._panning:
+            self._panning = False
+            self._pan_last_pos = None
+            self.canvas().setCursor(self._make_open_hand_cursor())
+            return
+        if self._edit_mode is not None:
             self._commit_edit()
 
     def _handle_context_menu(self, e):
@@ -208,6 +241,12 @@ class ObbEditTool(QgsMapTool):
     def keyPressEvent(self, e):
         key = e.key()
         text = e.text()
+        if key == Qt.Key.Key_Space and not e.isAutoRepeat():
+            # 按住空格进入平移模式（消费事件，阻断画布对空格的默认行为）
+            self._space_held = True
+            self.canvas().setCursor(self._make_open_hand_cursor())
+            e.accept()
+            return
         if key == Qt.Key.Key_Escape:
             self._cancel_action()
             e.accept()
@@ -232,7 +271,7 @@ class ObbEditTool(QgsMapTool):
                 self._nudge_selected(key, step)
                 e.accept()
                 return
-            if text:
+            if text and text.strip():  # 空格留给平移，不作类别快捷键
                 class_def = (
                     self.controller.project.class_by_hotkey(text)
                     if self.controller.project
@@ -243,6 +282,17 @@ class ObbEditTool(QgsMapTool):
                     e.accept()
                     return
         super().keyPressEvent(e)
+
+    def keyReleaseEvent(self, e):
+        if e.key() == Qt.Key.Key_Space and not e.isAutoRepeat():
+            self._space_held = False
+            if self._panning:
+                self._panning = False
+                self._pan_last_pos = None
+            self.canvas().setCursor(self._make_cross_cursor())
+            e.accept()
+            return
+        super().keyReleaseEvent(e)
 
     # ------------------------------------------------------------------ 绘制流程
 
@@ -362,7 +412,12 @@ class ObbEditTool(QgsMapTool):
         self._show_handles()
 
     def _apply_edit_drag(self, point: QgsPointXY):
-        """拖拽中实时更新几何（编辑模式由 _edit_mode 决定）。"""
+        """拖拽中实时更新几何。
+
+        - move：整体平移
+        - vertex：对角固定，整个矩形绕其旋转 + 等比缩放（对角线跟随鼠标）
+        - edge：对边固定，被拖边沿自身法向平移（单轴伸缩，角度不变）
+        """
         if self._edit_mode is None or not self._drag_orig_pts:
             return
         pts = list(self._drag_orig_pts)
@@ -370,30 +425,38 @@ class ObbEditTool(QgsMapTool):
             delta = _vsub(point, self._drag_anchor)
             pts = [_vadd(p, delta) for p in pts]
         elif self._edit_mode == "vertex":
-            fixed_opposite = (self._edit_index + 2) % 4
-            prev_i = (self._edit_index + 3) % 4
-            next_i = (self._edit_index + 1) % 4
-            o = pts[fixed_opposite]
-            axis_prev = _vunit(_vsub(pts[prev_i], o))
-            axis_next = _vunit(_vsub(pts[next_i], o))
-            d = _vsub(point, o)
-            new_prev = _vadd(o, _vmul(axis_prev, _vdot(d, axis_prev)))
-            new_next = _vadd(o, _vmul(axis_next, _vdot(d, axis_next)))
-            pts[prev_i] = new_prev
-            pts[next_i] = new_next
-            pts[self._edit_index] = _vadd(new_prev, _vsub(new_next, o))
+            i = self._edit_index
+            o_i = (i + 2) % 4
+            o = pts[o_i]
+            d0 = _vsub(self._drag_orig_pts[i], o)  # 原对角向量
+            d1 = _vsub(point, o)  # 目标对角向量
+            len0, len1 = _vlen(d0), _vlen(d1)
+            if len0 < 1e-9 or len1 < 1e-9:
+                return
+            ang = math.atan2(d1.y(), d1.x()) - math.atan2(d0.y(), d0.x())
+            scale = len1 / len0
+            cos_a, sin_a = math.cos(ang), math.sin(ang)
+
+            def _rot(p: QgsPointXY) -> QgsPointXY:
+                rel = _vsub(p, o)
+                return QgsPointXY(
+                    o.x() + (rel.x() * cos_a - rel.y() * sin_a) * scale,
+                    o.y() + (rel.x() * sin_a + rel.y() * cos_a) * scale,
+                )
+
+            pts = [_rot(p) if idx != o_i else p for idx, p in enumerate(pts)]
         elif self._edit_mode == "edge":
             i = self._edit_index
-            center = _vmul(
-                _vadd(_vadd(pts[0], pts[1]), _vadd(pts[2], pts[3])), 0.25
-            )
-            axis = _vunit(_vsub(pts[(i + 1) % 4], pts[i]))
-            normal = QgsPointXY(-axis.y(), axis.x())
-            half = _vdot(_vsub(point, center), normal)
-            sign = 1.0 if _vdot(_vsub(pts[i], center), normal) >= 0 else -1.0
-            offset = _vmul(normal, half * sign - _vdot(_vsub(pts[i], center), normal))
-            pts[i] = _vadd(pts[i], offset)
-            pts[(i + 1) % 4] = _vadd(pts[(i + 1) % 4], offset)
+            opp_i = (i + 2) % 4
+            edge = _vsub(pts[(i + 1) % 4], pts[i])
+            normal = _vunit(QgsPointXY(-edge.y(), edge.x()))
+            if _vlen(normal) < 1e-9:
+                return
+            old_off = _vdot(_vsub(pts[i], pts[opp_i]), normal)
+            new_off = _vdot(_vsub(point, pts[opp_i]), normal)
+            shift = new_off - old_off
+            pts[i] = _vadd(pts[i], _vmul(normal, shift))
+            pts[(i + 1) % 4] = _vadd(pts[(i + 1) % 4], _vmul(normal, shift))
         self._write_geometry(pts)
         self._set_preview(pts)
         self._show_handles()
@@ -585,3 +648,9 @@ class ObbEditTool(QgsMapTool):
 
     def _make_hand_cursor(self):
         return QCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _make_open_hand_cursor(self):
+        return QCursor(Qt.CursorShape.OpenHandCursor)
+
+    def _make_closed_hand_cursor(self):
+        return QCursor(Qt.CursorShape.ClosedHandCursor)
