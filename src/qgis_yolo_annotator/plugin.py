@@ -49,7 +49,8 @@ class YoloAnnotatorPlugin:
             existing = self.iface.mainWindow().findChild(
                 QDockWidget, "YoloAnnotatorDock"
             )
-            if existing is not None:
+            # widget 须仍是活的 MainDock（旧 dock 延迟删除期 widget() 会退化为裸 QWidget）
+            if existing is not None and hasattr(existing.widget(), "controller"):
                 self._dock = existing
                 self._panel = existing.widget()
             else:

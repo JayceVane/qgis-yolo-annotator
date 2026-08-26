@@ -13,7 +13,7 @@ from qgis.core import (
     QgsRectangle,
     QgsVectorLayer,
 )
-from qgis.PyQt.QtCore import QObject, pyqtSignal
+from qgis.PyQt.QtCore import QObject, QSettings, pyqtSignal
 
 from ..core.inference import get_session
 from ..core.model_registry import ModelConfig, ModelRegistry
@@ -61,6 +61,12 @@ def tiles_cache_dir() -> Path:
     return path
 
 
+# 会话恢复（QSettings 键）
+_SETTING_LAST_PROJECT = "qgis_yolo_annotator/last_project"
+_SETTING_LAST_IMAGE = "qgis_yolo_annotator/last_image"
+_SETTING_LAST_SCENE = "qgis_yolo_annotator/last_scene"
+
+
 class Controller(QObject):
     """插件状态中枢：当前工程 / 当前影像 / 标注与场景图层 / 模型注册表。
 
@@ -94,14 +100,63 @@ class Controller(QObject):
     def create_project(self, root: str, name: str) -> None:
         """新建并打开工程。"""
         self.project = AnnotationProject.create(root, name)
+        QSettings().setValue(_SETTING_LAST_PROJECT, str(Path(root).resolve()))
         self.project_changed.emit()
         self.status_message.emit(f"已创建工程: {name}")
 
     def open_project(self, root: str) -> None:
         """打开工程。"""
         self.project = AnnotationProject.open(root)
+        QSettings().setValue(_SETTING_LAST_PROJECT, str(Path(root).resolve()))
         self.project_changed.emit()
         self.status_message.emit(f"已打开工程: {self.project.name}")
+
+    def _remember_location(self, scene_name: str = "") -> None:
+        """记录当前影像/场景，供插件重载或重启后自动恢复。"""
+        settings = QSettings()
+        settings.setValue(_SETTING_LAST_IMAGE, self.current_image or "")
+        settings.setValue(_SETTING_LAST_SCENE, scene_name)
+
+    def restore_last_session(self) -> bool:
+        """恢复上次工程与影像/场景（插件重载、QGIS 重启后调用）。
+
+        Returns:
+            是否成功恢复了工程。
+        """
+        settings = QSettings()
+        project_root = settings.value(_SETTING_LAST_PROJECT, "", type=str)
+        last_image = settings.value(_SETTING_LAST_IMAGE, "", type=str)
+        last_scene = settings.value(_SETTING_LAST_SCENE, "", type=str)
+        # 注意：先读位置记录再开工程——open_project 等操作会重写位置记录
+        if not project_root or not Path(project_root, "project.json").is_file():
+            return False
+        try:
+            self.open_project(project_root)
+        except (FileNotFoundError, ValueError, OSError):
+            return False
+        if not last_image:
+            return True
+        try:
+            if last_image.startswith("xyz://"):
+                entry = self.project.find_image(last_image)
+                if entry is None:
+                    return True
+                scene = next(
+                    (s for s in entry.scenes if s.name == last_scene), None
+                )
+                if scene is not None and scene.source:
+                    self.load_scene(scene)  # 内含 attach + 画布定位
+                return True
+            if Path(last_image).is_file():
+                self.load_image(last_image)
+                if last_scene:
+                    for scene in self.scenes_of_current_image():
+                        if scene.name == last_scene:
+                            self.zoom_to_scene(scene)
+                            break
+        except (RuntimeError, ValueError) as exc:
+            self.status_message.emit(f"恢复上次位置失败: {exc}")
+        return True
 
     def save_project(self) -> None:
         """保存工程与当前影像标注。"""
@@ -146,6 +201,7 @@ class Controller(QObject):
 
         self.iface.mapCanvas().setExtent(raster_layer.extent())
         self.iface.mapCanvas().refresh()
+        self._remember_location()  # 文件影像无活动场景
         self.image_loaded.emit(self.current_image)
         self.status_message.emit(
             f"已加载 {Path(path).name}"
@@ -425,6 +481,7 @@ class Controller(QObject):
         raster = XyzRaster(source, scene.map_bbox, scene.zoom, tiles_cache_dir())
         self.raster = raster
         self.current_scene = scene
+        self._remember_location(scene.name)
         self.raster_layer = None  # xyz 模式无本地栅格图层（在线图层由用户自开）
         self._rebuild_annotation_features()
         self._rebuild_scene_features()

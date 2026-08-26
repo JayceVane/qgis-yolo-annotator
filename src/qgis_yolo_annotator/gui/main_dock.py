@@ -79,6 +79,9 @@ class MainDock(QWidget):
         self.controller.project_changed.connect(self._refresh_models)
         self.controller.labels_changed.connect(self._mark_pending_save)
 
+        # 插件重载 / QGIS 重启后自动恢复上次工程与影像/场景
+        self.controller.restore_last_session()
+
     # ================================================================== 工程页
 
     def _build_project_tab(self) -> QWidget:
