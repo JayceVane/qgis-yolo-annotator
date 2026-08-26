@@ -120,6 +120,7 @@ class MainDock(QWidget):
         self.tree_project = QTreeWidget()
         self.tree_project.setHeaderLabels(["影像 / 场景", "状态"])
         self.tree_project.itemDoubleClicked.connect(self._on_tree_double_click)
+        self.tree_project.itemClicked.connect(self._on_tree_clicked)
         layout.addWidget(self.tree_project, 1)
 
         self.label_stats = QLabel("未打开工程")
@@ -393,6 +394,60 @@ class MainDock(QWidget):
                 return str(path)
         return None
 
+    def _on_tree_clicked(self, item: QTreeWidgetItem, _column: int):
+        """单击场景行：切换到该场景视图（在线场景加载虚拟影像并定位）。"""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data or not str(data).startswith("scene::"):
+            return
+        _tag, image_path, scene_name = str(data).split("::", 2)
+        self.navigate_to_scene(image_path, scene_name)
+
+    def navigate_to_scene(self, image_path: str, scene_name: str):
+        """切换到指定场景的视图（必要时先加载归属影像/工作集）。"""
+        ctrl = self.controller
+        if ctrl.project is None:
+            return
+        if image_path.startswith("xyz://"):
+            if ctrl.current_image != image_path:
+                detected = ctrl.detect_xyz_layer()
+                if detected is not None:
+                    ctrl.attach_xyz_workset(*detected)
+                else:
+                    # 在线图层不在场时用场景自带的瓦片源配置恢复工作集
+                    from ..core.xyz_source import XyzSourceConfig
+
+                    entry = ctrl.project.find_image(image_path)
+                    if entry is None or not entry.scenes:
+                        return
+                    ctrl.attach_xyz_workset(
+                        XyzSourceConfig.from_dict(entry.scenes[0].source),
+                        image_path.removeprefix("xyz://"),
+                    )
+            scene = next(
+                (s for s in ctrl.scenes_of_current_image() if s.name == scene_name),
+                None,
+            )
+            if scene is None:
+                return
+            if ctrl.current_scene is None or ctrl.current_scene.name != scene_name:
+                ctrl.save_current_labels()
+                ctrl.load_scene(scene)  # 内含画布定位
+            else:
+                ctrl.zoom_to_scene(scene)
+        else:
+            if ctrl.current_image != image_path or ctrl.raster is None:
+                try:
+                    ctrl.load_image(image_path)
+                except (RuntimeError, ValueError) as exc:
+                    QMessageBox.warning(self, "加载影像", str(exc))
+                    return
+            scene = next(
+                (s for s in ctrl.scenes_of_current_image() if s.name == scene_name),
+                None,
+            )
+            if scene is not None:
+                ctrl.zoom_to_scene(scene)
+
     def _on_tree_double_click(self, item: QTreeWidgetItem, _column: int):
         image_path = item.data(0, Qt.ItemDataRole.UserRole)
         if not image_path:
@@ -452,6 +507,10 @@ class MainDock(QWidget):
                         f"{_STATUS_ICONS[scene.status]} {scene.name}",
                         SCENE_STATUS_LABELS_ORDER[scene.status],
                     ]
+                )
+                # 场景行编码归属，单击即切换到该场景视图
+                child.setData(
+                    0, Qt.ItemDataRole.UserRole, f"scene::{entry.path}::{scene.name}"
                 )
                 top.addChild(child)
             self.tree_project.addTopLevelItem(top)
