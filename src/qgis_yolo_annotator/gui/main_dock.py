@@ -410,7 +410,7 @@ class MainDock(QWidget):
             QMessageBox.warning(self, "加载影像", str(exc))
 
     def _on_scene_double_clicked(self, item: QListWidgetItem):
-        """双击场景：在线场景加载其虚拟影像网格（标注编辑切换）。"""
+        """双击场景：在线场景加载其虚拟影像并定位画布；文件场景直接定位到该场景范围。"""
         scene_name = item.data(Qt.ItemDataRole.UserRole)
         if not scene_name:
             return
@@ -418,11 +418,13 @@ class MainDock(QWidget):
             if scene.name == scene_name:
                 if scene.kind == "xyz":
                     self.controller.save_current_labels()
-                    self.controller.load_scene(scene)
+                    self.controller.load_scene(scene)  # load_scene 内含画布定位
+                elif self.controller.raster is not None:
+                    self.controller.zoom_to_scene(scene)
                 else:
                     self.iface.messageBar().pushMessage(
                         "YOLO Annotator",
-                        "文件影像场景请双击工程列表中的影像加载",
+                        "请先双击工程列表中的影像加载",
                         duration=4,
                     )
                 return

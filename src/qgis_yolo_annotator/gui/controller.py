@@ -412,7 +412,7 @@ class Controller(QObject):
             return None
 
     def load_scene(self, scene: SceneDef) -> None:
-        """加载 xyz 场景：构造虚拟影像网格（XyzRaster）并重建标注图层。"""
+        """加载 xyz 场景：构造虚拟影像网格（XyzRaster）并重建标注图层，画布定位到场景。"""
         if self.project is None or scene.kind != "xyz" or not scene.source:
             return
         entry = self._entry_of_scene(scene)
@@ -428,12 +428,49 @@ class Controller(QObject):
         self.raster_layer = None  # xyz 模式无本地栅格图层（在线图层由用户自开）
         self._rebuild_annotation_features()
         self._rebuild_scene_features()
+        self.zoom_to_scene(scene)
         self.image_loaded.emit(self.current_image)
         self.status_message.emit(
             f"已加载场景 {scene.name}"
             f"（{raster.width}×{raster.height} px @z{scene.zoom}，"
             f"≈{raster.resolution_m_per_px():.3f} m/px）"
         )
+
+    def zoom_to_scene(self, scene: SceneDef) -> None:
+        """画布定位到场景范围（xyz 用 map_bbox，文件场景像素→地图换算）。"""
+        from qgis.core import QgsRectangle
+
+        if scene.kind == "xyz" and scene.map_bbox:
+            rect = QgsRectangle(*scene.map_bbox)
+            rect = self._from_web_mercator(rect)
+        elif self.raster is not None:
+            x0, y0 = self.raster.pixel_to_map(scene.bbox[0], scene.bbox[1])
+            x1, y1 = self.raster.pixel_to_map(scene.bbox[2], scene.bbox[3])
+            rect = QgsRectangle(
+                min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
+            )
+        else:
+            return
+        if rect is None or rect.isEmpty():
+            return
+        rect = rect.buffered(max(rect.width(), rect.height()) * 0.08 + 1.0)
+        canvas = self.iface.mapCanvas()
+        canvas.setExtent(rect)
+        canvas.refresh()
+
+    def _from_web_mercator(self, rect: QgsRectangle) -> QgsRectangle | None:
+        """EPSG:3857 矩形 → 画布 CRS。"""
+        from qgis.core import QgsCoordinateReferenceSystem
+
+        canvas_crs = self.iface.mapCanvas().mapSettings().destinationCrs()
+        source = QgsCoordinateReferenceSystem("EPSG:3857")
+        if canvas_crs == source:
+            return QgsRectangle(rect)
+        transform = QgsCoordinateTransform(source, canvas_crs, QgsProject.instance())
+        try:
+            return transform.transformBoundingBox(rect)
+        except Exception:  # noqa: BLE001  变换失败按不可用处理
+            return None
 
     def _entry_of_scene(self, scene: SceneDef):
         """场景所属的影像条目（按对象或同名匹配）。"""
