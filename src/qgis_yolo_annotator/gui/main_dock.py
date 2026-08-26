@@ -670,9 +670,35 @@ class MainDock(QWidget):
 
     def _delete_scenes(self):
         names = self._selected_scene_names()
+        if not names:
+            return
+        # xyz 场景的标注独立成 JSON：确认是否连带删除
+        scenes = {
+            s.name: s
+            for s in self.controller.scenes_of_current_image()
+        }
+        with_labels = [
+            n for n in names if scenes.get(n) is not None and scenes[n].kind == "xyz"
+        ]
+        delete_labels = False
+        if with_labels:
+            answer = QMessageBox.question(
+                self,
+                "删除场景",
+                f"是否同时删除 {len(with_labels)} 个在线场景的标注 JSON？"
+                "（文件影像场景的标注为整影像共享，不受影响）",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            delete_labels = answer == QMessageBox.StandardButton.Yes
+        removed_files = 0
         for name in names:
-            self.controller.remove_scene(name)
-        self.controller.status_message.emit(f"已删除 {len(names)} 个场景")
+            removed_files += self.controller.remove_scene(
+                name, delete_labels=delete_labels
+            )
+        msg = f"已删除 {len(names)} 个场景"
+        if removed_files:
+            msg += f"（含 {removed_files} 个标注 JSON）"
+        self.controller.status_message.emit(msg)
 
     # ================================================================== 推理
 
@@ -772,8 +798,12 @@ class MainDock(QWidget):
                     break
         features = [shape_to_feature(s, raster) for s in shapes]
         if features:
-            controller.ann_layer.dataProvider().addFeatures(features)
-            controller.ann_layer.triggerRepaint()
+            layer = controller.ann_layer
+            layer.beginEditCommand(f"推理结果 {scene_name}")  # 整批 = 一步撤销
+            for feature in features:
+                layer.addFeature(feature)
+            layer.endEditCommand()
+            layer.triggerRepaint()
         controller.set_scene_status(scene_name, SCENE_STATUS_ANNOTATED)
         controller.save_current_labels()
         controller.status_message.emit(

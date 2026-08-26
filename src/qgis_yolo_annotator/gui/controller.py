@@ -215,6 +215,8 @@ class Controller(QObject):
         self._purge_stale_plugin_layers()
         for layer in (self.ann_layer, self.scene_layer):
             if layer is not None:
+                if layer.isEditable():
+                    layer.rollBack()  # JSON 已随操作落盘，缓冲直接弃置避免移除时弹窗
                 qgs.removeMapLayer(layer.id())
         if remove_raster_layer and self.raster_layer is not None:
             qgs.removeMapLayer(self.raster_layer.id())
@@ -242,16 +244,27 @@ class Controller(QObject):
                 qgs.removeMapLayer(layer.id())
 
     def _rebuild_annotation_features(self) -> None:
-        """从工程标注 JSON 重建标注图层要素（xyz 场景按场景名取 JSON）。"""
+        """从工程标注 JSON 重建标注图层要素（xyz 场景按场景名取 JSON）。
+
+        重建 = 更换编辑上下文：先回滚编辑缓冲（JSON 已随每次操作落盘），
+        再全量替换要素并清空撤销栈（跨场景撤销无意义）。
+        """
         assert self.project and self.raster and self.ann_layer and self.current_image
+        layer = self.ann_layer
+        if layer.isEditable():
+            layer.rollBack()
         shapes = self.project.load_image_labels(
             self.current_image, scene_name=self.scene_label_scope()
         )
-        provider = self.ann_layer.dataProvider()
+        provider = layer.dataProvider()
         provider.truncate()
         features = [shape_to_feature(s, self.raster) for s in shapes]
         provider.addFeatures(features)
-        self.ann_layer.triggerRepaint()
+        layer.updateFields()
+        if not layer.isEditable():
+            layer.startEditing()  # 常驻编辑会话：所有操作进 QGIS undo 栈
+        layer.undoStack().clear()
+        layer.triggerRepaint()
 
     def _rebuild_scene_features(self) -> None:
         """从工程场景重建场景图层要素（raster 允许 None：xyz 场景不依赖）。"""
@@ -578,17 +591,44 @@ class Controller(QObject):
         self.project.save()
         self.project_changed.emit()
 
-    def remove_scene(self, scene_name: str) -> None:
-        """删除当前影像的某场景。"""
+    def remove_scene(self, scene_name: str, delete_labels: bool = False) -> int:
+        """删除当前影像的某场景。
+
+        Args:
+            scene_name: 场景名。
+            delete_labels: xyz 场景为 True 时同步删除其标注 JSON
+                （文件影像场景的 JSON 为整影像共享，不做删除）。
+
+        Returns:
+            删除的标注 JSON 文件数（0 或 1）。
+        """
         if self.project is None or self.current_image is None:
-            return
+            return 0
         entry = self.project.find_image(self.current_image)
         if entry is None:
-            return
+            return 0
+        target = next((s for s in entry.scenes if s.name == scene_name), None)
+        if target is None:
+            return 0
         entry.scenes = [s for s in entry.scenes if s.name != scene_name]
+        removed = 0
+        if delete_labels and target.kind == "xyz":
+            # 若正在编辑该场景，先切走引用避免图层再写回
+            if self.current_scene is not None and self.current_scene.name == scene_name:
+                self.current_scene = None
+                if self.ann_layer is not None and self.ann_layer.isEditable():
+                    self.ann_layer.rollBack()
+                if self.raster is not None:
+                    self.raster.close()
+                self.raster = None
+            label_path = self.project.label_path(self.current_image, scene_name=scene_name)
+            if label_path.is_file():
+                label_path.unlink()
+                removed = 1
         self._rebuild_scene_features()
         self.project.save()
         self.project_changed.emit()
+        return removed
 
     def scenes_of_current_image(self) -> list[SceneDef]:
         """当前影像的场景列表。"""
@@ -608,6 +648,8 @@ class Controller(QObject):
     def batch_replace_label(self, old_name: str, new_name: str, project_wide: bool) -> int:
         """批量替换类别：当前影像（图层+JSON）或整个工程（labels/*.json）。
 
+        当前图层经编辑命令替换（单步可撤销）；其余 JSON 直接改写。
+
         Args:
             old_name: 原类别名。
             new_name: 目标类别名。
@@ -622,11 +664,34 @@ class Controller(QObject):
         if self.project is None:
             raise RuntimeError("尚未打开工程")
         self.save_current_labels()  # 当前图层先落盘，保证 JSON 为最新
+        count = 0
+        if self.ann_layer is not None and self.raster is not None:
+            # 当前图层：编辑命令分组（单步撤销）
+            attr_idx = self.ann_layer.fields().indexOf("label")
+            matching = [
+                f.id()
+                for f in self.ann_layer.getFeatures()
+                if f.attribute("label") == old_name
+            ]
+            if matching:
+                self.ann_layer.beginEditCommand(f"批量替换 {old_name}→{new_name}")
+                for fid in matching:
+                    self.ann_layer.changeAttributeValue(fid, attr_idx, new_name)
+                self.ann_layer.endEditCommand()
+                count += len(matching)
+        # JSON 侧：当前场景 JSON 已由图层落盘步骤之外单独处理——
+        # 图层替换后再落盘即可；其余场景/影像的 JSON 工程级替换（排除当前）
         if project_wide:
-            count = self.project.replace_label(old_name, new_name)
-        else:
-            if self.current_image is None:
-                return 0
+            current_path = None
+            if self.current_image is not None:
+                current_path = self.project.label_path(
+                    self.current_image, scene_name=self.scene_label_scope()
+                )
+            count += self.project.replace_label(
+                old_name, new_name, exclude_path=current_path
+            )
+        elif self.current_image is not None:
+            # 非图层可见的直标文件影像（ann_layer 为空时兜底直接改 JSON）
             label_path = self.project.label_path(
                 self.current_image, scene_name=self.scene_label_scope()
             )
@@ -635,28 +700,71 @@ class Controller(QObject):
             try:
                 doc = load_label(label_path)
             except ValueError:
-                return 0
-            if doc is None:
-                return 0
-            count = 0
-            for shape in doc.get("shapes", []):
-                if shape.get("label") == old_name:
-                    shape["label"] = new_name
-                    count += 1
-            if count:
-                save_label(label_path, doc)
+                doc = None
+            if doc is not None and self.ann_layer is None:
+                changed = 0
+                for shape in doc.get("shapes", []):
+                    if shape.get("label") == old_name:
+                        shape["label"] = new_name
+                        changed += 1
+                if changed:
+                    save_label(label_path, doc)
+                    count += changed
+        self.save_current_labels()  # 图层替换结果落盘
         if self.ann_layer is not None and self.raster is not None:
-            self._rebuild_annotation_features()  # 刷新图层显示
             self.project_changed.emit()
         return count
 
     def rename_class_sync(self, old_name: str, new_name: str) -> int:
-        """类别表改名并同步全部标注（工程级 replace_label）。"""
-        if self.project is None:
-            raise RuntimeError("尚未打开工程")
-        self.save_current_labels()
-        count = self.project.replace_label(old_name, new_name)
-        if self.ann_layer is not None and self.raster is not None:
-            self._rebuild_annotation_features()
-            self.project_changed.emit()
-        return count
+        """类别表改名并同步全部标注（当前图层走可撤销编辑，其余改 JSON）。"""
+        return self.batch_replace_label(old_name, new_name, project_wide=True)
+
+    # ------------------------------------------------------------------ 撤销/重做
+
+    def undo_annotation(self) -> bool:
+        """撤销当前标注图层上一步操作（QGIS undo 栈）。
+
+        Returns:
+            是否执行了撤销。
+        """
+        layer = self.ann_layer
+        if layer is None or not layer.undoStack().canUndo():
+            return False
+        layer.undoStack().undo()
+        # 撤销可能删掉/改掉选中目标，选择状态按现状重建
+        if self._selected_missing():
+            self.on_selection_invalidated()
+        self.labels_changed.emit()
+        return True
+
+    def redo_annotation(self) -> bool:
+        """重做当前标注图层上一步被撤销的操作。
+
+        Returns:
+            是否执行了重做。
+        """
+        layer = self.ann_layer
+        if layer is None or not layer.undoStack().canRedo():
+            return False
+        layer.undoStack().redo()
+        if self._selected_missing():
+            self.on_selection_invalidated()
+        self.labels_changed.emit()
+        return True
+
+    def _selected_missing(self) -> bool:
+        """当前主选中要素是否已不存在。"""
+        if self.ann_layer is None:
+            return True
+        tool = self.iface.mapCanvas().mapTool()
+        fid = getattr(tool, "_selected_fid", None)
+        if fid is None:
+            return False
+        return not self.ann_layer.getFeature(fid).isValid()
+
+    def on_selection_invalidated(self) -> None:
+        """撤销/重做导致选中目标失效时回调（由工具注册清理）。"""
+        tool = self.iface.mapCanvas().mapTool()
+        clear = getattr(tool, "_clear_selection", None)
+        if callable(clear):
+            clear()

@@ -275,6 +275,17 @@ class ObbEditTool(QgsMapTool):
                 self._select_all()
                 e.accept()
                 return
+            if key == Qt.Key.Key_Z and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                if e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    self.controller.redo_annotation()
+                else:
+                    self.controller.undo_annotation()
+                e.accept()
+                return
+            if key == Qt.Key.Key_Y and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self.controller.redo_annotation()
+                e.accept()
+                return
             if key in (
                 Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
             ):
@@ -392,7 +403,9 @@ class ObbEditTool(QgsMapTool):
 
         shape = make_shape(label, pts_px, "rotation")
         feature = shape_to_feature(shape, raster)
-        layer.dataProvider().addFeature(feature)
+        layer.beginEditCommand("绘制 OBB")
+        layer.addFeature(feature)
+        layer.endEditCommand()
         layer.triggerRepaint()
         self.controller.labels_changed.emit()
 
@@ -411,6 +424,7 @@ class ObbEditTool(QgsMapTool):
                 self._edit_index = index
                 self._drag_orig_pts = pts
                 self._drag_anchor = point
+                layer.beginEditCommand("编辑 OBB")  # 一次拖拽 = 一步撤销
                 return True
         # 未命中手柄 → 查找要素内部
         for feature in layer.getFeatures():
@@ -422,6 +436,7 @@ class ObbEditTool(QgsMapTool):
                 self._edit_mode = "move"
                 self._drag_anchor = point
                 self._drag_orig_pts = self._feature_ring(feature)
+                layer.beginEditCommand("移动 OBB")
                 return True
         return False
 
@@ -444,6 +459,9 @@ class ObbEditTool(QgsMapTool):
         return None
 
     def _commit_edit(self):
+        layer = self.controller.ann_layer
+        if layer is not None and self._edit_mode is not None:
+            layer.endEditCommand()
         self._edit_mode = None
         self._edit_index = -1
         self._drag_anchor = None
@@ -505,7 +523,7 @@ class ObbEditTool(QgsMapTool):
             return
         ring = pts + [pts[0]]
         geometry = QgsGeometry.fromPolygonXY([ring])
-        layer.dataProvider().changeGeometryValues({self._selected_fid: geometry})
+        layer.changeGeometry(self._selected_fid, geometry)
         layer.triggerRepaint()
         self.controller.labels_changed.emit()
 
@@ -538,26 +556,27 @@ class ObbEditTool(QgsMapTool):
         return [self._selected_fid] if self._selected_fid is not None else []
 
     def _set_selected_label(self, label: str):
-        """给全部选中目标改类别（批量）。"""
+        """给全部选中目标改类别（批量，单步撤销）。"""
         layer = self.controller.ann_layer
         fids = self._active_fids()
         if layer is None or not fids:
             return
         attr_idx = layer.fields().indexOf("label")
-        layer.dataProvider().changeAttributeValues(
-            {fid: {attr_idx: label} for fid in fids}
-        )
+        layer.beginEditCommand(f"改类别 → {label}")
+        for fid in fids:
+            layer.changeAttributeValue(fid, attr_idx, label)
+        layer.endEditCommand()
         layer.triggerRepaint()
         self.controller.labels_changed.emit()
         self._show_handles()
         try:
             if len(fids) > 1:
                 self.controller.iface.statusBarIface().showMessage(
-                    f"已批量修改 {len(fids)} 个目标为「{label}」（自动保存）"
+                    f"已批量修改 {len(fids)} 个目标为「{label}」（自动保存，Ctrl+Z 撤销）"
                 )
             else:
                 self.controller.iface.statusBarIface().showMessage(
-                    f"类别已改为「{label}」（自动保存）"
+                    f"类别已改为「{label}」（自动保存，Ctrl+Z 撤销）"
                 )
         except RuntimeError:
             pass
@@ -603,12 +622,15 @@ class ObbEditTool(QgsMapTool):
         self._handles = []
 
     def _delete_selected(self):
-        """删除全部选中目标（批量）。"""
+        """删除全部选中目标（批量，单步撤销）。"""
         layer = self.controller.ann_layer
         fids = self._active_fids()
         if layer is None or not fids:
             return
-        layer.dataProvider().deleteFeatures(fids)
+        layer.beginEditCommand(f"删除 {len(fids)} 个目标")
+        for fid in fids:
+            layer.deleteFeature(fid)
+        layer.endEditCommand()
         layer.triggerRepaint()
         self._clear_selection()
         self.controller.labels_changed.emit()
@@ -658,7 +680,9 @@ class ObbEditTool(QgsMapTool):
             return
         pts = self._feature_ring(layer.getFeature(self._selected_fid))
         pts = [_vadd(p, QgsPointXY(dx, dy)) for p in pts]
+        layer.beginEditCommand("微调 OBB")
         self._write_geometry(pts)
+        layer.endEditCommand()
         self._show_handles()
 
     # ------------------------------------------------------------------ 杂项

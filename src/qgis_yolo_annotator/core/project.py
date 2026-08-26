@@ -389,12 +389,15 @@ class AnnotationProject:
                 return idx
         return None
 
-    def replace_label(self, old_name: str, new_name: str) -> int:
+    def replace_label(
+        self, old_name: str, new_name: str, exclude_path: Path | None = None
+    ) -> int:
         """工程级类别替换：把所有标注 JSON 中 label==old_name 的 shape 改为 new_name。
 
         Args:
             old_name: 原类别名（与 new_name 相同直接返回 0）。
             new_name: 目标类别名。
+            exclude_path: 排除的 JSON 路径（如当前场景由图层编辑命令处理时）。
 
         Returns:
             替换的 shape 总数（遍历 labels/*.json，原子写回；损坏文件跳过）。
@@ -404,8 +407,11 @@ class AnnotationProject:
         labels_dir = self.root / "labels"
         if not labels_dir.is_dir():
             return 0
+        exclude = exclude_path.resolve() if exclude_path is not None else None
         total = 0
         for path in sorted(labels_dir.glob("*.json")):
+            if exclude is not None and path.resolve() == exclude:
+                continue
             try:
                 doc = load_label(path)
             except ValueError:
