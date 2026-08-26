@@ -139,15 +139,18 @@ class MainDock(QWidget):
         self.btn_tool_pan = QPushButton("指针/平移")
         self.combo_default_label = QComboBox()
         self.btn_classes = QPushButton("类别管理")
+        self.btn_batch_edit = QPushButton("批量编辑…")
         self.btn_tool_obb.clicked.connect(self._activate_obb_tool)
         self.btn_tool_scene.clicked.connect(self._activate_scene_tool)
         self.btn_tool_pan.clicked.connect(self._activate_pan)
         self.btn_classes.clicked.connect(self._manage_classes)
+        self.btn_batch_edit.clicked.connect(self._batch_edit_labels)
         tools_row.addWidget(self.btn_tool_obb)
         tools_row.addWidget(self.btn_tool_scene)
         tools_row.addWidget(self.btn_tool_pan)
         tools_row.addWidget(self.combo_default_label, 1)
         tools_row.addWidget(self.btn_classes)
+        tools_row.addWidget(self.btn_batch_edit)
         layout.addWidget(box_tools)
 
         # 模型行
@@ -570,20 +573,79 @@ class MainDock(QWidget):
         project = self.controller.project
         if project is None:
             return
+        old_names = [c.name for c in project.classes]
         dialog = ClassDialog(project.classes, self)
-        if dialog.exec():
-            project.classes = dialog.classes
-            from .annotation_layer import apply_class_renderer
+        if not dialog.exec():
+            return
+        project.classes = dialog.classes
+        # 检测行序对应的重命名 → 询问是否同步全部标注
+        renamed = [
+            (old_name, new_def.name)
+            for old_name, new_def in zip(old_names, project.classes)
+            if new_def.name != old_name
+        ]
+        if renamed and any(
+            self.controller.project.label_counts().get(old, 0) > 0
+            for old, _new in renamed
+        ):
+            detail = "、".join(f"「{o}」→「{n}」" for o, n in renamed)
+            answer = QMessageBox.question(
+                self,
+                "同步标注",
+                f"检测到类别改名：{detail}\n是否同步更新工程中所有标注的类别？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                for old_name, new_name in renamed:
+                    self.controller.rename_class_sync(old_name, new_name)
+        from .annotation_layer import apply_class_renderer
 
-            if self.controller.ann_layer is not None:
-                apply_class_renderer(self.controller.ann_layer, project.classes)
-            self._refresh_label_combo()
-            project.save()
+        if self.controller.ann_layer is not None:
+            apply_class_renderer(self.controller.ann_layer, project.classes)
+        self._refresh_label_combo()
+        project.save()
 
     def _manage_models(self):
         dialog = ModelDialog(self.controller.registry, self)
         dialog.exec()
         self._refresh_models()
+
+    def _batch_edit_labels(self):
+        """批量替换类别（当前影像 / 整个工程）。"""
+        project = self.controller.project
+        if project is None or not project.classes:
+            self.iface.messageBar().pushMessage(
+                "YOLO Annotator", "请先打开工程并配置类别", duration=3
+            )
+            return
+        from .batch_edit_dialog import BatchEditDialog
+
+        dialog = BatchEditDialog(
+            [c.name for c in project.classes],
+            project.label_counts(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        old_name, new_name = dialog.get_old(), dialog.get_new()
+        wide = dialog.is_project_wide()
+        confirm = QMessageBox.question(
+            self,
+            "批量编辑",
+            f"把{('整个工程' if wide else '当前影像/场景')}中所有「{old_name}」"
+            f"改为「{new_name}」？此操作不可撤销。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            count = self.controller.batch_replace_label(old_name, new_name, wide)
+        except RuntimeError as exc:
+            QMessageBox.warning(self, "批量编辑", str(exc))
+            return
+        self.controller.status_message.emit(
+            f"批量替换完成：{count} 个标注「{old_name}」→「{new_name}」"
+        )
 
     # ================================================================== 场景操作
 

@@ -389,6 +389,57 @@ class AnnotationProject:
                 return idx
         return None
 
+    def replace_label(self, old_name: str, new_name: str) -> int:
+        """工程级类别替换：把所有标注 JSON 中 label==old_name 的 shape 改为 new_name。
+
+        Args:
+            old_name: 原类别名（与 new_name 相同直接返回 0）。
+            new_name: 目标类别名。
+
+        Returns:
+            替换的 shape 总数（遍历 labels/*.json，原子写回；损坏文件跳过）。
+        """
+        if old_name == new_name:
+            return 0
+        labels_dir = self.root / "labels"
+        if not labels_dir.is_dir():
+            return 0
+        total = 0
+        for path in sorted(labels_dir.glob("*.json")):
+            try:
+                doc = load_label(path)
+            except ValueError:
+                continue
+            if doc is None:
+                continue
+            changed = 0
+            for shape in doc.get("shapes", []):
+                if shape.get("label") == old_name:
+                    shape["label"] = new_name
+                    changed += 1
+            if changed:
+                save_label(path, doc)
+                total += changed
+        return total
+
+    def label_counts(self) -> dict[str, int]:
+        """全工程各类别标注数量统计（labels/*.json 遍历）。"""
+        labels_dir = self.root / "labels"
+        counts: dict[str, int] = {}
+        if not labels_dir.is_dir():
+            return counts
+        for path in sorted(labels_dir.glob("*.json")):
+            try:
+                doc = load_label(path)
+            except ValueError:
+                continue
+            if doc is None:
+                continue
+            for shape in doc.get("shapes", []):
+                name = str(shape.get("label", ""))
+                counts[name] = counts.get(name, 0) + 1
+        return counts
+
     def class_by_hotkey(self, key: str) -> ClassDef | None:
         """快捷键 → 类别定义。"""
         for c in self.classes:

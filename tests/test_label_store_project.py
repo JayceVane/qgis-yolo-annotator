@@ -119,6 +119,29 @@ def test_yolo_obb_export_import_roundtrip(tmp_path):
     assert np.allclose(np.asarray(loaded[0]["points"]), np.asarray(original_pts), atol=0.01)
 
 
+def test_replace_label_and_counts(project, tmp_path):
+    """工程级类别替换 + 数量统计。"""
+    img1 = tmp_path / "a.png"
+    img2 = tmp_path / "b.png"
+    for img in (img1, img2):
+        img.write_bytes(b"stub")
+        project.add_image(img)
+    project.save_image_labels(img1, [
+        make_shape("Truck", [[0, 0], [9, 0], [9, 4], [0, 4]], "rotation"),
+        make_shape("Van", [[1, 1], [9, 1], [9, 4], [1, 4]], "rotation"),
+    ], 100, 50)
+    project.save_image_labels(img2, [
+        make_shape("Truck", [[2, 2], [9, 2], [9, 4], [2, 4]], "rotation"),
+    ], 100, 50)
+    counts = project.label_counts()
+    assert counts["Truck"] == 2 and counts["Van"] == 1
+    replaced = project.replace_label("Truck", "Bus")
+    assert replaced == 2
+    assert project.label_counts()["Bus"] == 2
+    assert project.label_counts().get("Truck", 0) == 0
+    assert project.replace_label("same", "same") == 0
+
+
 # ------------------------------------------------------------------ project
 
 

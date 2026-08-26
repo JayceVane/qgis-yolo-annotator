@@ -602,3 +602,61 @@ class Controller(QObject):
     def get_model_session(self, config: ModelConfig):
         """获取模型推理会话（进程内缓存）。"""
         return get_session(config.file_path, config.task)
+
+    # ------------------------------------------------------------------ 批量编辑
+
+    def batch_replace_label(self, old_name: str, new_name: str, project_wide: bool) -> int:
+        """批量替换类别：当前影像（图层+JSON）或整个工程（labels/*.json）。
+
+        Args:
+            old_name: 原类别名。
+            new_name: 目标类别名。
+            project_wide: True=整个工程；False=仅当前影像/场景。
+
+        Returns:
+            替换的标注数量。
+
+        Raises:
+            RuntimeError: 未打开工程。
+        """
+        if self.project is None:
+            raise RuntimeError("尚未打开工程")
+        self.save_current_labels()  # 当前图层先落盘，保证 JSON 为最新
+        if project_wide:
+            count = self.project.replace_label(old_name, new_name)
+        else:
+            if self.current_image is None:
+                return 0
+            label_path = self.project.label_path(
+                self.current_image, scene_name=self.scene_label_scope()
+            )
+            from ..core.label_store import load_label, save_label
+
+            try:
+                doc = load_label(label_path)
+            except ValueError:
+                return 0
+            if doc is None:
+                return 0
+            count = 0
+            for shape in doc.get("shapes", []):
+                if shape.get("label") == old_name:
+                    shape["label"] = new_name
+                    count += 1
+            if count:
+                save_label(label_path, doc)
+        if self.ann_layer is not None and self.raster is not None:
+            self._rebuild_annotation_features()  # 刷新图层显示
+            self.project_changed.emit()
+        return count
+
+    def rename_class_sync(self, old_name: str, new_name: str) -> int:
+        """类别表改名并同步全部标注（工程级 replace_label）。"""
+        if self.project is None:
+            raise RuntimeError("尚未打开工程")
+        self.save_current_labels()
+        count = self.project.replace_label(old_name, new_name)
+        if self.ann_layer is not None and self.raster is not None:
+            self._rebuild_annotation_features()
+            self.project_changed.emit()
+        return count

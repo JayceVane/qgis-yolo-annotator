@@ -80,6 +80,8 @@ class ObbEditTool(QgsMapTool):
         self._handles: list[QgsVertexMarker] = []
         self._copied_pts: list[QgsPointXY] | None = None
         self._last_cursor_pos: QgsPointXY | None = None
+        # 多选（Ctrl+点击批量改类别/删除）
+        self._selected_fids: set[int] = set()
         # Space 平移状态
         self._space_held: bool = False
         self._panning: bool = False
@@ -171,19 +173,20 @@ class ObbEditTool(QgsMapTool):
         self._show_class_menu(self.canvas().mapToGlobal(e.pos()))
 
     def _hit_selected(self, point: QgsPointXY) -> bool:
-        """点击位置是否落在当前选中目标内（右键不误换目标）。"""
+        """点击位置是否落在任一选中目标内（右键不误换目标）。"""
         layer = self.controller.ann_layer
-        if layer is None or self._selected_fid is None:
-            return False
-        feature = layer.getFeature(self._selected_fid)
-        geometry = feature.geometry()
-        if geometry is None or geometry.isEmpty():
+        if layer is None or not self._active_fids():
             return False
         tolerance = self.canvas().mapSettings().mapUnitsPerPixel() * _HIT_RADIUS_PX
-        in_geometry = (
-            geometry.boundingBox().contains(point) and geometry.contains(point)
-        )
-        return in_geometry or (self._hit_handle(point, tolerance) is not None)
+        if self._hit_handle(point, tolerance) is not None:
+            return True
+        for fid in self._active_fids():
+            geometry = layer.getFeature(fid).geometry()
+            if geometry is None or geometry.isEmpty():
+                continue
+            if geometry.boundingBox().contains(point) and geometry.contains(point):
+                return True
+        return False
 
     def _hit_feature(self, point: QgsPointXY) -> int | None:
         """点击位置命中的要素 fid。"""
@@ -203,31 +206,35 @@ class ObbEditTool(QgsMapTool):
         return None
 
     def _show_class_menu(self, global_pos):
-        """弹出类别修改菜单（全部类别，带颜色与快捷键标注）。"""
+        """弹出类别修改菜单（全部类别，带颜色与快捷键标注；多选时批量应用）。"""
         from qgis.PyQt.QtGui import QColor, QIcon, QPixmap
         from qgis.PyQt.QtWidgets import QMenu
 
         project = self.controller.project
         layer = self.controller.ann_layer
-        if project is None or layer is None or self._selected_fid is None:
+        fids = self._active_fids()
+        if project is None or layer is None or not fids:
             return
         current_label = ""
-        feature = layer.getFeature(self._selected_fid)
+        feature = layer.getFeature(fids[0])
         if feature.isValid():
             current_label = str(feature.attribute("label") or "")
 
         menu = QMenu(self.canvas())
         menu.setWindowTitle("修改类别")
-        current_row = menu.addAction(f"当前：{current_label or '(无类别)'}")
-        current_row.setEnabled(False)
+        if len(fids) > 1:
+            header = menu.addAction(f"批量修改 {len(fids)} 个目标")
+        else:
+            header = menu.addAction(f"当前：{current_label or '(无类别)'}")
+        header.setEnabled(False)
         menu.addSeparator()
-        for index, class_def in enumerate(project.classes, start=1):
+        for class_def in project.classes:
             pixmap = QPixmap(12, 12)
             pixmap.fill(QColor(class_def.color or "#ff77ff"))
             action = menu.addAction(QIcon(pixmap), class_def.name)
             if class_def.hotkey:
                 action.setText(f"{class_def.name}    [{class_def.hotkey}]")
-            if class_def.name == current_label:
+            if class_def.name == current_label and len(fids) == 1:
                 action.setCheckable(True)
                 action.setChecked(True)
             action.triggered.connect(
@@ -264,6 +271,10 @@ class ObbEditTool(QgsMapTool):
                 self._paste_copied()
                 e.accept()
                 return
+            if key == Qt.Key.Key_A and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self._select_all()
+                e.accept()
+                return
             if key in (
                 Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
             ):
@@ -297,6 +308,23 @@ class ObbEditTool(QgsMapTool):
     # ------------------------------------------------------------------ 绘制流程
 
     def _handle_idle_click(self, point: QgsPointXY, modifiers):
+        # Ctrl+点击：多选切换（不进入绘制/编辑）
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            hit_fid = self._hit_feature(point)
+            if hit_fid is not None:
+                if hit_fid in self._selected_fids:
+                    self._selected_fids.discard(hit_fid)
+                else:
+                    self._selected_fids.add(hit_fid)
+                if self._selected_fids:
+                    self._selected_fid = sorted(self._selected_fids)[0]
+                    self._show_handles()
+                else:
+                    self._clear_selection()
+                self._report_multi_selection()
+            else:
+                self._clear_selection()
+            return
         # 先尝试进入编辑（命中手柄/要素），否则开始绘制
         if self._try_begin_edit(point):
             return
@@ -304,6 +332,16 @@ class ObbEditTool(QgsMapTool):
         self._p0 = point
         self._state = "drawing_edge"
         self.canvas().setCursor(self._make_cross_cursor())
+
+    def _report_multi_selection(self):
+        """多选后状态栏提示。"""
+        try:
+            if len(self._selected_fids) > 1:
+                self.controller.iface.statusBarIface().showMessage(
+                    f"已多选 {len(self._selected_fids)} 个目标：右键批量改类别 / Del 批量删除"
+                )
+        except RuntimeError:
+            pass
 
     def _finish_draw(self, point: QgsPointXY):
         assert self._p0 is not None and self._p1 is not None
@@ -474,7 +512,9 @@ class ObbEditTool(QgsMapTool):
     # ------------------------------------------------------------------ 选择/快捷操作
 
     def _select(self, fid: int):
+        """单选（重置多选集合）。"""
         self._selected_fid = fid
+        self._selected_fids = {fid}
         self._show_handles()
         # 状态栏操作提示（改类别的主入口告知）
         label = ""
@@ -485,30 +525,46 @@ class ObbEditTool(QgsMapTool):
                 label = str(feature.attribute("label") or "")
         try:
             self.controller.iface.statusBarIface().showMessage(
-                f"已选中「{label}」：右键改类别 / 数字键快速改 / Del 删除 / 方向键微调"
+                f"已选中「{label}」：右键改类别 / 数字键快速改 / Del 删除 / "
+                f"Ctrl+点击多选 / 方向键微调"
             )
         except RuntimeError:
             pass
 
+    def _active_fids(self) -> list[int]:
+        """当前作用目标（多选集合优先，兼容旧单选字段）。"""
+        if self._selected_fids:
+            return sorted(self._selected_fids)
+        return [self._selected_fid] if self._selected_fid is not None else []
+
     def _set_selected_label(self, label: str):
+        """给全部选中目标改类别（批量）。"""
         layer = self.controller.ann_layer
-        if layer is None or self._selected_fid is None:
+        fids = self._active_fids()
+        if layer is None or not fids:
             return
+        attr_idx = layer.fields().indexOf("label")
         layer.dataProvider().changeAttributeValues(
-            {self._selected_fid: {layer.fields().indexOf("label"): label}}
+            {fid: {attr_idx: label} for fid in fids}
         )
         layer.triggerRepaint()
         self.controller.labels_changed.emit()
         self._show_handles()
         try:
-            self.controller.iface.statusBarIface().showMessage(
-                f"类别已改为「{label}」（自动保存）"
-            )
+            if len(fids) > 1:
+                self.controller.iface.statusBarIface().showMessage(
+                    f"已批量修改 {len(fids)} 个目标为「{label}」（自动保存）"
+                )
+            else:
+                self.controller.iface.statusBarIface().showMessage(
+                    f"类别已改为「{label}」（自动保存）"
+                )
         except RuntimeError:
             pass
 
     def _clear_selection(self):
         self._selected_fid = None
+        self._selected_fids = set()
         self._edit_mode = None
         for marker in self._handles:
             self.canvas().scene().removeItem(marker)
@@ -547,23 +603,26 @@ class ObbEditTool(QgsMapTool):
         self._handles = []
 
     def _delete_selected(self):
+        """删除全部选中目标（批量）。"""
         layer = self.controller.ann_layer
-        if layer is None or self._selected_fid is None:
+        fids = self._active_fids()
+        if layer is None or not fids:
             return
-        layer.dataProvider().deleteFeatures([self._selected_fid])
+        layer.dataProvider().deleteFeatures(fids)
         layer.triggerRepaint()
         self._clear_selection()
         self.controller.labels_changed.emit()
 
-    def _set_selected_label(self, label: str):
+    def _select_all(self):
+        """Ctrl+A：全选当前标注图层要素。"""
         layer = self.controller.ann_layer
-        if layer is None or self._selected_fid is None:
+        if layer is None:
             return
-        layer.dataProvider().changeAttributeValues(
-            {self._selected_fid: {layer.fields().indexOf("label"): label}}
-        )
-        layer.triggerRepaint()
-        self.controller.labels_changed.emit()
+        self._selected_fids = {f.id() for f in layer.getFeatures()}
+        if self._selected_fids:
+            self._selected_fid = sorted(self._selected_fids)[0]
+            self._clear_handles()  # 多选不画手柄
+            self._report_multi_selection()
 
     def _copy_selected(self):
         layer = self.controller.ann_layer
