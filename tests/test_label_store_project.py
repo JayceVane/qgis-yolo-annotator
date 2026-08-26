@@ -6,6 +6,7 @@ import pytest
 
 from qgis_yolo_annotator.core.label_store import (
     import_dota,
+    import_yolo_obb,
     load_label,
     make_label_doc,
     make_shape,
@@ -76,6 +77,46 @@ def test_import_dota(tmp_path):
     assert shapes[0]["difficult"] is False
     assert shapes[1]["difficult"] is True
     assert shapes[1]["points"] == [[1, 2], [3, 4], [5, 6], [7, 8]]
+
+
+def test_import_yolo_obb(tmp_path):
+    """归一化角点 → 像素坐标反解 + cid 类别映射。"""
+    p = tmp_path / "img.txt"
+    # 200x100 影像：框1 (0.1,0.2)-(0.3,0.2)-(0.3,0.4)-(0.1,0.4)；框2 无效 cid=9 跳过
+    p.write_text(
+        "0 0.1 0.2 0.3 0.2 0.3 0.4 0.1 0.4\n"
+        "9 0.5 0.5 0.6 0.5 0.6 0.6 0.5 0.6\n",
+        encoding="utf-8",
+    )
+    shapes = import_yolo_obb(p, 200, 100, ["Small_Car", "Truck"])
+    assert len(shapes) == 1
+    assert shapes[0]["label"] == "Small_Car"
+    pts = shapes[0]["points"]
+    assert pts[0] == [20.0, 20.0]
+    assert pts[2] == [60.0, 40.0]
+    assert shapes[0]["shape_type"] == "rotation"
+
+
+def test_import_yolo_obb_bad_line(tmp_path):
+    p = tmp_path / "bad.txt"
+    p.write_text("0 0.1 0.2\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="字段数"):
+        import_yolo_obb(p, 100, 100, ["a"])
+
+
+def test_yolo_obb_export_import_roundtrip(tmp_path):
+    """导出（converters）→ 导入回环：几何一致性。"""
+    from qgis_yolo_annotator.export.converters import yolo_obb_lines
+
+    original_pts = [[80.0, 90.0], [120.0, 90.0], [120.0, 110.0], [80.0, 110.0]]
+    shape = {"label": "Car", "points": [list(p) for p in original_pts], "difficult": False}
+    lines = yolo_obb_lines([shape], ["Car"], 200, 200)
+    p = tmp_path / "rt.txt"
+    p.write_text(lines[0], encoding="utf-8")
+    loaded = import_yolo_obb(p, 200, 200, ["Car"])
+    import numpy as np
+
+    assert np.allclose(np.asarray(loaded[0]["points"]), np.asarray(original_pts), atol=0.01)
 
 
 # ------------------------------------------------------------------ project

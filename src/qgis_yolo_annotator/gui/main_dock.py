@@ -99,11 +99,20 @@ class MainDock(QWidget):
         row2 = QHBoxLayout()
         btn_add_img = QPushButton("添加影像…")
         btn_add_dir = QPushButton("导入文件夹…")
+        btn_import_labels = QPushButton("导入标注(YOLO-OBB/DOTA)…")
         btn_add_img.clicked.connect(self._add_images)
         btn_add_dir.clicked.connect(self._add_image_folder)
+        btn_import_labels.clicked.connect(self._import_yolo_obb_labels)
         row2.addWidget(btn_add_img)
         row2.addWidget(btn_add_dir)
         layout.addLayout(row2)
+
+        row3 = QHBoxLayout()
+        row3.addWidget(btn_import_labels)
+        btn_import_dota = QPushButton("导入 DOTA…")
+        btn_import_dota.clicked.connect(self._import_dota_labels)
+        row3.addWidget(btn_import_dota)
+        layout.addLayout(row3)
 
         self.tree_project = QTreeWidget()
         self.tree_project.setHeaderLabels(["影像 / 场景", "状态"])
@@ -283,6 +292,100 @@ class MainDock(QWidget):
         self.controller.project.save()
         self.controller.status_message.emit(f"导入 {len(added)} 幅影像")
         self.controller.project_changed.emit()
+
+    def _import_yolo_obb_labels(self):
+        """导入 YOLO-OBB 数据集标注：选 images 目录 + labels 目录（同名配对）。"""
+        self._import_label_dataset("yolo_obb")
+
+    def _import_dota_labels(self):
+        """导入 DOTA 数据集标注：选 images 目录 + labelTxt 目录（同名配对）。"""
+        self._import_label_dataset("dota")
+
+    def _import_label_dataset(self, fmt: str):
+        """通用标注导入：images/labels 目录同名配对 → 工程影像+场景/标注。
+
+        项目结构惯例：images/train|val/*.tif + labels(train|val)/*.txt；
+        labels 文件按 <stem>.txt 与影像配对，导入为该影像的直标（无场景拆分）。
+        """
+        from qgis_yolo_annotator.core.label_store import import_dota, import_yolo_obb
+        from qgis_yolo_annotator.core.raster_io import RasterRef
+
+        project = self.controller.project
+        if project is None:
+            self.iface.messageBar().pushMessage(
+                "YOLO Annotator", "请先新建/打开工程", duration=3
+            )
+            return
+        images_dir = QFileDialog.getExistingDirectory(
+            self, f"选择[{fmt}] images 目录（含影像）"
+        )
+        if not images_dir:
+            return
+        labels_dir = QFileDialog.getExistingDirectory(
+            self, f"选择[{fmt}] labels 目录（同名 .txt/.xml 标注）"
+        )
+        if not labels_dir:
+            return
+
+        # 类别表：优先工程类别；labels 旁有 classes.txt 则提示核对
+        classes_file = Path(labels_dir).parent / "classes.txt"
+        external_names: list[str] = []
+        if classes_file.is_file():
+            external_names = [
+                line.strip()
+                for line in classes_file.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            for name in external_names:
+                project.add_class(name)
+
+        imported_images = 0
+        imported_shapes = 0
+        label_files = sorted(Path(labels_dir).rglob("*.txt"))
+        for label_path in label_files:
+            if label_path.name == "classes.txt":
+                continue
+            stem = label_path.stem
+            image_path = self._find_image_by_stem(Path(images_dir), stem)
+            if image_path is None:
+                continue
+            try:
+                raster_ref = RasterRef.open(image_path)
+            except (RuntimeError, OSError):
+                continue
+            entry = project.add_image(image_path)
+            if fmt == "yolo_obb":
+                shapes = import_yolo_obb(
+                    label_path, raster_ref.width, raster_ref.height,
+                    [c.name for c in project.classes],
+                )
+            else:
+                shapes = import_dota(label_path)
+            if shapes:
+                project.save_image_labels(
+                    image_path, shapes, raster_ref.width, raster_ref.height
+                )
+                imported_shapes += len(shapes)
+            imported_images += 1
+            raster_ref.close()
+        project.save()
+        self.controller.project_changed.emit()
+        self.iface.messageBar().pushMessage(
+            "YOLO Annotator",
+            f"导入完成：{imported_images} 幅影像、{imported_shapes} 个标注"
+            + (f"（classes.txt {len(external_names)} 类已并入工程）" if external_names else ""),
+            duration=6,
+        )
+
+    @staticmethod
+    def _find_image_by_stem(images_dir: Path, stem: str) -> str | None:
+        """在 images 目录递归查找主名匹配的影像文件。"""
+        from ..core.project import IMAGE_EXTENSIONS
+
+        for path in sorted(images_dir.rglob("*")):
+            if path.is_file() and path.stem == stem and path.suffix.lower() in IMAGE_EXTENSIONS:
+                return str(path)
+        return None
 
     def _on_tree_double_click(self, item: QTreeWidgetItem, _column: int):
         image_path = item.data(0, Qt.ItemDataRole.UserRole)

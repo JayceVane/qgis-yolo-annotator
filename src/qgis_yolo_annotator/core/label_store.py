@@ -192,3 +192,48 @@ def import_dota(path: str | Path) -> list[dict]:
             make_shape(label, points, "rotation", difficult=difficult)
         )
     return shapes
+
+
+def import_yolo_obb(
+    path: str | Path,
+    image_width: int,
+    image_height: int,
+    class_names: list[str],
+) -> list[dict]:
+    """导入 YOLO-OBB txt（归一化角点）为 rotation shapes（像素坐标）。
+
+    行格式：cid x1 y1 x2 y2 x3 y3 x4 y4（坐标归一化 [0,1]，除宽对应 x、除高对应 y）
+
+    Args:
+        path: label txt 路径。
+        image_width, image_height: 影像像素尺寸（反归一化基准）。
+        class_names: 类别表（行序=cid）。
+
+    Returns:
+        rotation shape 列表；cid 超出类别表的行跳过并忽略。
+
+    Raises:
+        ValueError: 行格式非法。
+    """
+    shapes: list[dict] = []
+    path = Path(path)
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 9:
+            raise ValueError(f"YOLO-OBB 行字段数需为 9: {path}:{lineno}")
+        try:
+            cid = int(parts[0])
+            normed = [float(v) for v in parts[1:9]]
+        except ValueError as exc:
+            raise ValueError(f"YOLO-OBB 解析失败: {path}:{lineno}") from exc
+        if cid < 0 or cid >= len(class_names):
+            continue
+        points = [
+            [normed[i * 2] * image_width, normed[i * 2 + 1] * image_height]
+            for i in range(4)
+        ]
+        shapes.append(make_shape(class_names[cid], points, "rotation"))
+    return shapes
