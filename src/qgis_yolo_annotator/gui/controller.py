@@ -156,6 +156,7 @@ class Controller(QObject):
     def _teardown_layers(self, remove_raster_layer: bool = True) -> None:
         """移除旧图层并释放栅格句柄（attach xyz 工作集时可保留文件栅格图层）。"""
         qgs = QgsProject.instance()
+        self._purge_stale_plugin_layers()
         for layer in (self.ann_layer, self.scene_layer):
             if layer is not None:
                 qgs.removeMapLayer(layer.id())
@@ -168,6 +169,21 @@ class Controller(QObject):
         if remove_raster_layer:
             self.raster_layer = None
         self.raster = None
+
+    def _purge_stale_plugin_layers(self) -> None:
+        """清理插件重载后遗留的孤儿标注/场景图层（按图层名匹配，跳过本实例在用的）。"""
+        qgs = QgsProject.instance()
+        keep_ids = {
+            layer.id()
+            for layer in (self.ann_layer, self.scene_layer)
+            if layer is not None
+        }
+        for layer in list(qgs.mapLayers().values()):
+            if (
+                layer.name() in (ANN_LAYER_NAME, SCENE_LAYER_NAME)
+                and layer.id() not in keep_ids
+            ):
+                qgs.removeMapLayer(layer.id())
 
     def _rebuild_annotation_features(self) -> None:
         """从工程标注 JSON 重建标注图层要素（xyz 场景按场景名取 JSON）。"""
@@ -268,9 +284,11 @@ class Controller(QObject):
             self.ann_layer = create_annotation_layer(crs_wkt)
             self.scene_layer = create_scene_layer(crs_wkt)
             apply_class_renderer(self.ann_layer, self.project.classes)
+            self._purge_stale_plugin_layers()
             QgsProject.instance().addMapLayer(self.ann_layer)
             QgsProject.instance().addMapLayer(self.scene_layer)
             self._rebuild_scene_features()
+            self.iface.mapCanvas().refresh()
             self.image_loaded.emit(workset_id)
         return entry
 

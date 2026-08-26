@@ -36,19 +36,21 @@ _FIELDS_SPEC = [
 _FALLBACK_COLOR = "#ff77ff"
 
 
-def create_annotation_layer(crs_wkt: str | None) -> QgsVectorLayer:
+def create_annotation_layer(crs: str | None) -> QgsVectorLayer:
     """创建标注内存图层（含字段与分类渲染占位）。
 
     Args:
-        crs_wkt: 影像 CRS WKT；None 时图层无 CRS（像素坐标直存）。
+        crs: CRS 定义（authid 如 "EPSG:3857" 或 WKT）；None 时图层无 CRS。
+            用 setCrs 而非 URI 拼接——WKT 拼入 memory URI 会解析失败。
 
     Returns:
         QgsVectorLayer（Polygon memory）。
     """
-    uri = "Polygon?memory"
-    if crs_wkt:
-        uri += f"&crs={crs_wkt.replace('"', "'")}"
-    layer = QgsVectorLayer(uri, LAYER_NAME, "memory")
+    layer = QgsVectorLayer("Polygon?memory", LAYER_NAME, "memory")
+    if crs:
+        from qgis.core import QgsCoordinateReferenceSystem
+
+        layer.setCrs(QgsCoordinateReferenceSystem(crs))
     provider = layer.dataProvider()
     fields = QgsFields()
     for name, qtype, _doc in _FIELDS_SPEC:

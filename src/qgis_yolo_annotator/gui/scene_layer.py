@@ -32,12 +32,16 @@ _STATUS_COLORS = {
 }
 
 
-def create_scene_layer(crs_wkt: str | None) -> QgsVectorLayer:
-    """创建场景内存图层（Polygon，字段 name/status/image_path）。"""
-    uri = "Polygon?memory"
-    if crs_wkt:
-        uri += f"&crs={crs_wkt.replace('"', "'")}"
-    layer = QgsVectorLayer(uri, LAYER_NAME, "memory")
+def create_scene_layer(crs: str | None) -> QgsVectorLayer:
+    """创建场景内存图层（Polygon，字段 name/status/image_path）。
+
+    crs 传 authid 或 WKT（setCrs 方式，见 create_annotation_layer 说明）。
+    """
+    layer = QgsVectorLayer("Polygon?memory", LAYER_NAME, "memory")
+    if crs:
+        from qgis.core import QgsCoordinateReferenceSystem
+
+        layer.setCrs(QgsCoordinateReferenceSystem(crs))
     provider = layer.dataProvider()
     provider.addAttributes(
         [
