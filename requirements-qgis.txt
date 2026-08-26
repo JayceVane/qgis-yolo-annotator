@@ -1,0 +1,4 @@
+# 安装到 QGIS 自带 Python（不要装到其他解释器）：
+# cmd /c "D:\Tools\QGIS\bin\python-qgis.bat -m pip install -r requirements-qgis.txt"
+onnxruntime>=1.18,<2
+opencv-python-headless>=4.10

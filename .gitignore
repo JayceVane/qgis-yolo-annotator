@@ -1,0 +1,18 @@
+# 机器相关环境配置
+ENVIRONMENT.md
+
+# 测试与临时产物
+.pytest_tmp/
+.test_data/
+*.onnx
+*.pt
+
+# Python
+__pycache__/
+*.pyc
+dist/
+downloads/
+.zcode/
+# 编辑器
+.vscode/
+.idea/
