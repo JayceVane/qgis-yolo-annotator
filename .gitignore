@@ -16,3 +16,4 @@ downloads/
 # 编辑器
 .vscode/
 .idea/
+.tmp/

@@ -1,7 +1,0 @@
-path: D:/Workspace/SarDetection/t2_qgis_intelligent/.tmp/pt/test_export_dataset_metadata_a0/ds
-train: images/train
-val: images/val
-nc: 1
-names:
-  0: Car
-task: obb
