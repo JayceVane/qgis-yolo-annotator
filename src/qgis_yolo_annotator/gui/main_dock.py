@@ -934,6 +934,7 @@ class MainDock(QWidget):
                             scene.map_bbox,
                             scene.zoom,
                             tiles_cache_dir(),
+                            name=scene.name,  # 多场景同名导出会互相覆盖
                         )
                     except (ValueError, KeyError) as exc:
                         self.iface.messageBar().pushMessage(

@@ -153,6 +153,7 @@ class XyzRaster:
         bbox_map: list[float],
         zoom: int,
         cache_dir: str | Path,
+        name: str | None = None,
     ):
         """初始化虚拟影像。
 
@@ -161,6 +162,8 @@ class XyzRaster:
             bbox_map: [xmin, ymin, xmax, ymax] EPSG:3857 地图坐标。
             zoom: 瓦片级别。
             cache_dir: 瓦片缓存目录。
+            name: 影像名（导出文件命名用）。同一图层的多个场景必须传各自
+                场景名，否则导出文件同名互相覆盖；缺省用“图层_z”。
         """
         if len(bbox_map) != 4 or bbox_map[0] >= bbox_map[2] or bbox_map[1] >= bbox_map[3]:
             raise ValueError(f"bbox_map 非法: {bbox_map}")
@@ -181,7 +184,7 @@ class XyzRaster:
         self.geotransform = (xmin, res, 0.0, ymax, 0.0, -res)
         self.crs_wkt = EPSG3857_WKT  # 导出 GeoTIFF/建图层时携带投影
         self.is_geographic = False
-        self.path = Path(f"{source.title}_z{zoom}")  # 兼容 RasterRef.path 命名语义
+        self.path = Path(name) if name else Path(f"{source.title}_z{zoom}")  # 兼容 RasterRef.path 命名语义
         self.band_count = 3
         self._cache = TileCache(cache_dir)
         self._tile_store: dict[tuple[int, int, int], np.ndarray | None] = {}

@@ -1,6 +1,7 @@
 """xyz_source 单测：几何换算、zoom 选择、虚拟影像网格与瓦片拼接（mock 瓦片）。"""
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -123,3 +124,13 @@ def test_tile_cache_roundtrip(tmp_path):
     cache = TileCache(tmp_path)
     url = "https://example.com/tile.png"
     assert cache.get(url) is None  # 无网络（或失败）返回 None 不抛异常
+
+
+def test_xyz_raster_default_and_custom_name(tmp_path):
+    """导出命名回归：同图层多场景必须可区分，否则导出文件互相覆盖。"""
+    bbox = [0.0, 0.0, 500.0, 500.0]
+    config = XyzSourceConfig(URL, "TestSat", 0, 20)
+    default = XyzRaster(config, bbox, 19, tmp_path)
+    named = XyzRaster(config, bbox, 19, tmp_path, name="scene_001")
+    assert default.path == Path("TestSat_z19")
+    assert named.path == Path("scene_001")
