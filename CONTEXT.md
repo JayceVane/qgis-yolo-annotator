@@ -1,6 +1,18 @@
 # CONTEXT.md — 会话交接
 
-更新：2026-08-26（四轮：类别修改交互强化）
+更新：2026-08-26（本轮：场景范围调整）
+
+## 本轮：场景范围调整（调场景工具）
+
+- `gui/scene_edit_tool.py`：SceneEditTool——悬停命中 4 角点 + 4 边中点手柄（10px 容差）拖拽改大小、矩形内部拖拽整体移动；黄色橡皮带预览；Esc/右键取消
+- `controller.update_scene_extent(scene_name, rect)`：
+  - 文件场景：像素 bbox clip 到影像范围，标注（影像级坐标）不受影响
+  - xyz 场景：更新 map_bbox（zoom 不变）；网格原点变更时标注按像素平移迁移（`label_store.shift_shapes`），越出新范围标注保留并计数提示；当前场景即时重开虚拟网格 + 重建标注图层
+  - 迁移数学：shift_x=(old_x0-new_x0)/res，shift_y=(new_y1-old_y1)/res（res=meters_per_pixel(zoom) 纬度 0）
+- `controller.scene_map_rect(scene)`：场景→画布矩形（zoom_to_scene 重构共用）
+- main_dock 标注工具行新增「调场景」按钮
+- 无头实测 scripts/diag_scene_edit.py 四用例全过（西/北扩迁移数值精确、收缩保留、过小拒绝、文件场景 clip）；77 单测全过
+- 注意：shape points 格式为 [[x,y],...] 对列表（非 {"x","y"} 字典）
 
 ## 四轮：改类别交互（v0.1.3）
 

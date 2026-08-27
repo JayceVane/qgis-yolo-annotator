@@ -237,3 +237,36 @@ def import_yolo_obb(
         ]
         shapes.append(make_shape(class_names[cid], points, "rotation"))
     return shapes
+
+
+def shift_shapes(shapes: list[dict], dx_px: float, dy_px: float) -> list[dict]:
+    """标注 shapes 像素坐标整体平移（场景网格原点变更时迁移用）。
+
+    Args:
+        shapes: shapes（points 为 [[x, y], ...] 顶点序列）。
+        dx_px: x 方向平移像素（向右为正）。
+        dy_px: y 方向平移像素（向下为正）。
+
+    Returns:
+        平移后的新列表（原列表不修改）。
+    """
+    moved = []
+    for shape in shapes:
+        new_shape = dict(shape)
+        new_shape["points"] = [
+            [float(x) + dx_px, float(y) + dy_px] for x, y in shape.get("points", [])
+        ]
+        moved.append(new_shape)
+    return moved
+
+
+def count_shapes_outside(shapes: list[dict], width: float, height: float) -> int:
+    """统计任一顶点越出 [0,width]×[0,height] 的 shape 数（收缩范围提示用）。"""
+    count = 0
+    for shape in shapes:
+        if any(
+            x < 0 or x > width or y < 0 or y > height
+            for x, y in shape.get("points", [])
+        ):
+            count += 1
+    return count

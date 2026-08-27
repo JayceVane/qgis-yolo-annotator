@@ -16,6 +16,7 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QObject, QSettings, pyqtSignal
 
 from ..core.inference import get_session
+from ..core.label_store import count_shapes_outside, shift_shapes
 from ..core.model_registry import ModelConfig, ModelRegistry
 from ..core.project import AnnotationProject, SceneDef
 from ..core.raster_io import RasterRef
@@ -65,6 +66,9 @@ def tiles_cache_dir() -> Path:
 _SETTING_LAST_PROJECT = "qgis_yolo_annotator/last_project"
 _SETTING_LAST_IMAGE = "qgis_yolo_annotator/last_image"
 _SETTING_LAST_SCENE = "qgis_yolo_annotator/last_scene"
+
+# 场景最小边长（像素）：小于此值视为误画/误拖，拒绝创建或调整
+_MIN_SCENE_PX = 2.0
 
 
 class Controller(QObject):
@@ -413,7 +417,7 @@ class Controller(QObject):
             min(float(self.raster.width), max(col0, col1)),
             min(float(self.raster.height), max(row0, row1)),
         ]
-        if bbox[2] - bbox[0] < 2.0 or bbox[3] - bbox[1] < 2.0:
+        if bbox[2] - bbox[0] < _MIN_SCENE_PX or bbox[3] - bbox[1] < _MIN_SCENE_PX:
             self.status_message.emit("场景范围过小，已忽略")
             return None
         scene = self.project.add_scene(self.current_image, bbox)
@@ -506,21 +510,25 @@ class Controller(QObject):
             f"≈{raster.resolution_m_per_px():.3f} m/px）"
         )
 
-    def zoom_to_scene(self, scene: SceneDef) -> None:
-        """画布定位到场景范围（xyz 用 map_bbox，文件场景像素→地图换算）。"""
+    def scene_map_rect(self, scene: SceneDef) -> QgsRectangle | None:
+        """场景范围的画布坐标矩形（xyz 用 map_bbox，文件场景像素→地图换算）。
+
+        Returns:
+            画布 CRS 矩形；场景无可用范围或坐标变换失败时 None。
+        """
         from qgis.core import QgsRectangle
 
         if scene.kind == "xyz" and scene.map_bbox:
-            rect = QgsRectangle(*scene.map_bbox)
-            rect = self._from_web_mercator(rect)
-        elif self.raster is not None:
-            x0, y0 = self.raster.pixel_to_map(scene.bbox[0], scene.bbox[1])
-            x1, y1 = self.raster.pixel_to_map(scene.bbox[2], scene.bbox[3])
-            rect = QgsRectangle(
-                min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
-            )
-        else:
-            return
+            return self._from_web_mercator(QgsRectangle(*scene.map_bbox))
+        if self.raster is None:
+            return None
+        x0, y0 = self.raster.pixel_to_map(scene.bbox[0], scene.bbox[1])
+        x1, y1 = self.raster.pixel_to_map(scene.bbox[2], scene.bbox[3])
+        return QgsRectangle(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
+    def zoom_to_scene(self, scene: SceneDef) -> None:
+        """画布定位到场景范围。"""
+        rect = self.scene_map_rect(scene)
         if rect is None or rect.isEmpty():
             return
         rect = rect.buffered(max(rect.width(), rect.height()) * 0.08 + 1.0)
@@ -649,6 +657,118 @@ class Controller(QObject):
             return []
         entry = self.project.find_image(self.current_image)
         return list(entry.scenes) if entry else []
+
+    def update_scene_extent(self, scene_name: str, rect: QgsRectangle) -> bool:
+        """调整当前影像某场景的范围（画布坐标矩形）。
+
+        文件场景：换算为像素 bbox 并 clip 到影像范围，标注为影像级坐标不受影响。
+        xyz 场景：更新 map_bbox（zoom 不变）；网格原点变更时已有标注按像素
+        平移迁移保持对齐，越出新范围的标注保留（仅计数提示）。
+
+        Args:
+            scene_name: 场景名。
+            rect: 新范围（画布 CRS）。
+
+        Returns:
+            是否成功调整（范围过小/坐标变换失败时 False）。
+        """
+        if self.project is None or self.current_image is None:
+            return False
+        entry = self.project.find_image(self.current_image)
+        if entry is None:
+            return False
+        target = next((s for s in entry.scenes if s.name == scene_name), None)
+        if target is None:
+            return False
+        rect = QgsRectangle(rect)
+        rect.normalize()
+        if rect.isEmpty():
+            return False
+
+        if target.kind == "xyz":
+            rect_m = self._to_web_mercator(rect)
+            if rect_m is None:
+                self.status_message.emit("坐标变换失败，无法调整场景")
+                return False
+            # 网格分辨率：纬度 0 的 meters_per_pixel 即 3857 单位/像素
+            grid_res = meters_per_pixel(target.zoom)
+            new_w = rect_m.width() / grid_res
+            new_h = rect_m.height() / grid_res
+            if new_w < _MIN_SCENE_PX or new_h < _MIN_SCENE_PX:
+                self.status_message.emit("场景范围过小，已忽略")
+                return False
+            is_current = (
+                self.current_scene is not None
+                and self.current_scene.name == scene_name
+            )
+            if is_current:
+                self.save_current_labels()  # 旧网格标注先落盘，防迁移后被覆写
+            shapes = self.project.load_image_labels(
+                self.current_image, scene_name=scene_name
+            )
+            if shapes and target.map_bbox:
+                old_x0, _, _, old_y1 = target.map_bbox
+                shift_x = (old_x0 - rect_m.xMinimum()) / grid_res
+                shift_y = (rect_m.yMaximum() - old_y1) / grid_res
+                if abs(shift_x) > 1e-9 or abs(shift_y) > 1e-9:
+                    shapes = shift_shapes(shapes, shift_x, shift_y)
+            outside = count_shapes_outside(shapes, new_w, new_h) if shapes else 0
+            target.map_bbox = [
+                rect_m.xMinimum(),
+                rect_m.yMinimum(),
+                rect_m.xMaximum(),
+                rect_m.yMaximum(),
+            ]
+            target.bbox = [0.0, 0.0, new_w, new_h]
+            if shapes:
+                self.project.save_image_labels(
+                    self.current_image,
+                    shapes,
+                    int(new_w),
+                    int(new_h),
+                    scene_name=scene_name,
+                )
+            if is_current:
+                # 网格已变：重开虚拟影像并按迁移后的 JSON 重建标注图层
+                if self.raster is not None:
+                    self.raster.close()
+                self.raster = None
+                self.current_scene = None  # 强制 load_scene 重走加载路径
+                self.load_scene(target)
+            self._rebuild_scene_features()
+            self.project.save()
+            self.project_changed.emit()
+            msg = f"场景 {scene_name} 已调整为 {new_w:.0f}×{new_h:.0f} px"
+            if shapes:
+                msg += f"；{len(shapes)} 个标注已随网格迁移"
+            if outside:
+                msg += f"，{outside} 个越出新范围（已保留）"
+            self.status_message.emit(msg)
+            return True
+
+        # ---- 文件影像分支
+        if self.raster is None or self.current_image is None:
+            self.status_message.emit("请先加载影像")
+            return False
+        col0, row0 = self.raster.map_to_pixel(rect.xMinimum(), rect.yMaximum())
+        col1, row1 = self.raster.map_to_pixel(rect.xMaximum(), rect.yMinimum())
+        bbox = [
+            max(0.0, min(col0, col1)),
+            max(0.0, min(row0, row1)),
+            min(float(self.raster.width), max(col0, col1)),
+            min(float(self.raster.height), max(row0, row1)),
+        ]
+        if bbox[2] - bbox[0] < _MIN_SCENE_PX or bbox[3] - bbox[1] < _MIN_SCENE_PX:
+            self.status_message.emit("场景范围过小，已忽略")
+            return False
+        target.bbox = bbox
+        self._rebuild_scene_features()
+        self.project.save()
+        self.project_changed.emit()
+        self.status_message.emit(
+            f"场景 {scene_name} 已调整为 {target.width:.0f}×{target.height:.0f} px"
+        )
+        return True
 
     # ------------------------------------------------------------------ 模型
 

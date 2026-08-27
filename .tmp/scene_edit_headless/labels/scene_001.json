@@ -1,0 +1,42 @@
+{
+  "version": "4.0.2",
+  "flags": {},
+  "checked": false,
+  "shapes": [
+    {
+      "label": "car",
+      "score": null,
+      "points": [
+        [
+          210.94972743699412,
+          76.98324247899939
+        ],
+        [
+          220.94972743699464,
+          76.98324247899939
+        ],
+        [
+          220.94972743699464,
+          96.98324247899885
+        ],
+        [
+          210.94972743699412,
+          96.98324247899885
+        ]
+      ],
+      "group_id": null,
+      "description": "",
+      "difficult": false,
+      "shape_type": "rotation",
+      "flags": {},
+      "attributes": {},
+      "kie_linking": [],
+      "direction": 0.0
+    }
+  ],
+  "imagePath": "scene_001",
+  "imageData": null,
+  "imageHeight": 669,
+  "imageWidth": 803,
+  "description": ""
+}

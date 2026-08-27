@@ -60,6 +60,7 @@ class MainDock(QWidget):
         self.controller = Controller(iface)
         self._obb_tool: ObbEditTool | None = None
         self._scene_tool: SceneDrawTool | None = None
+        self._scene_edit_tool = None
         self._tasks: list = []
 
         self.tabs = QTabWidget()
@@ -137,17 +138,23 @@ class MainDock(QWidget):
         tools_row = QHBoxLayout(box_tools)
         self.btn_tool_obb = QPushButton("画 OBB")
         self.btn_tool_scene = QPushButton("画场景")
+        self.btn_tool_edit_scene = QPushButton("调场景")
+        self.btn_tool_edit_scene.setToolTip(
+            "拖角点/边调整场景大小，拖内部整体移动；在线场景的标注自动随网格迁移"
+        )
         self.btn_tool_pan = QPushButton("指针/平移")
         self.combo_default_label = QComboBox()
         self.btn_classes = QPushButton("类别管理")
         self.btn_batch_edit = QPushButton("批量编辑…")
         self.btn_tool_obb.clicked.connect(self._activate_obb_tool)
         self.btn_tool_scene.clicked.connect(self._activate_scene_tool)
+        self.btn_tool_edit_scene.clicked.connect(self._activate_scene_edit_tool)
         self.btn_tool_pan.clicked.connect(self._activate_pan)
         self.btn_classes.clicked.connect(self._manage_classes)
         self.btn_batch_edit.clicked.connect(self._batch_edit_labels)
         tools_row.addWidget(self.btn_tool_obb)
         tools_row.addWidget(self.btn_tool_scene)
+        tools_row.addWidget(self.btn_tool_edit_scene)
         tools_row.addWidget(self.btn_tool_pan)
         tools_row.addWidget(self.combo_default_label, 1)
         tools_row.addWidget(self.btn_classes)
@@ -625,6 +632,24 @@ class MainDock(QWidget):
             return
         self._scene_tool = SceneDrawTool(self.iface.mapCanvas(), self.controller)
         self.iface.mapCanvas().setMapTool(self._scene_tool)
+
+    def _activate_scene_edit_tool(self):
+        if self.controller.project is None or self.controller.current_image is None:
+            self.iface.messageBar().pushMessage(
+                "YOLO Annotator", "请先加载影像或在线工作集", duration=3
+            )
+            return
+        if not self.controller.scenes_of_current_image():
+            self.iface.messageBar().pushMessage(
+                "YOLO Annotator", "当前影像暂无场景，请先用「画场景」添加", duration=3
+            )
+            return
+        from .scene_edit_tool import SceneEditTool
+
+        self._scene_edit_tool = SceneEditTool(
+            self.iface.mapCanvas(), self.controller
+        )
+        self.iface.mapCanvas().setMapTool(self._scene_edit_tool)
 
     def _activate_pan(self):
         self.iface.actionPan().trigger()
