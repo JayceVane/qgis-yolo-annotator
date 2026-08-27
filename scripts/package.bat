@@ -1,9 +1,10 @@
 @echo off
-rem 打包插件 zip（用于发布或安装到其他机器）
+rem 打包插件 zip（版本号取自 metadata.txt，产物 dist/qgis_yolo_annotator-<ver>.zip）
 setlocal
 set PLUGIN_NAME=qgis_yolo_annotator
 set STAGE=%TEMP%\%PLUGIN_NAME%_pkg
-set OUT=%~dp0..\dist\%PLUGIN_NAME%.zip
+for /f "tokens=2 delims==" %%v in ('findstr /b "version=" "%~dp0..\src\%PLUGIN_NAME%\metadata.txt"') do set VER=%%v
+set OUT=%~dp0..\dist\%PLUGIN_NAME%-%VER%.zip
 
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%"
