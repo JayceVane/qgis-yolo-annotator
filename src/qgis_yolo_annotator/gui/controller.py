@@ -612,20 +612,32 @@ class Controller(QObject):
             return 0
         entry.scenes = [s for s in entry.scenes if s.name != scene_name]
         removed = 0
-        if delete_labels and target.kind == "xyz":
-            # 若正在编辑该场景，先切走引用避免图层再写回
+        clear_visual = False
+        if target.kind == "xyz":
+            # 只要删的是当前加载的场景就先解除引用，与是否连删 JSON 无关：
+            # 引用悬空会让后续保存把旧要素写回失效作用域
             if self.current_scene is not None and self.current_scene.name == scene_name:
                 self.current_scene = None
+                clear_visual = True
                 if self.ann_layer is not None and self.ann_layer.isEditable():
                     self.ann_layer.rollBack()
                 if self.raster is not None:
                     self.raster.close()
                 self.raster = None
-            label_path = self.project.label_path(self.current_image, scene_name=scene_name)
-            if label_path.is_file():
-                label_path.unlink()
-                removed = 1
+            if delete_labels:
+                label_path = self.project.label_path(self.current_image, scene_name=scene_name)
+                if label_path.is_file():
+                    label_path.unlink()
+                    removed = 1
         self.ensure_annotation_editable()  # rollBack 会退出编辑会话，恢复之
+        if clear_visual and self.ann_layer is not None:
+            # 标注图层只承载当前场景的要素；rollBack 只丢弃未提交编辑，
+            # 已入库要素须显式清空，画布才与「场景已删」一致
+            layer = self.ann_layer
+            layer.dataProvider().truncate()
+            layer.updateFields()
+            layer.undoStack().clear()
+            layer.triggerRepaint()
         self._rebuild_scene_features()
         self.project.save()
         self.project_changed.emit()

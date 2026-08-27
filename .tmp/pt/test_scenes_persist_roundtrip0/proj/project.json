@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "name": "测试工程",
+  "classes": [
+    {
+      "name": "Small Car",
+      "color": "#aaaaff",
+      "hotkey": "1"
+    },
+    {
+      "name": "Truck",
+      "color": "#ffaaaa",
+      "hotkey": "2"
+    }
+  ],
+  "images": [
+    {
+      "path": "D:\\Workspace\\SarDetection\\t2_qgis_intelligent\\.tmp\\pt\\test_scenes_persist_roundtrip0\\a.tif",
+      "scenes": [
+        {
+          "name": "scene_001",
+          "bbox": [
+            10.0,
+            10.0,
+            100.0,
+            80.0
+          ],
+          "status": "unannotated",
+          "kind": "pixel",
+          "map_bbox": null,
+          "zoom": null,
+          "source": null
+        }
+      ],
+      "kind": "file"
+    }
+  ],
+  "active_model": ""
+}

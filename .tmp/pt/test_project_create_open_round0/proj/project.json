@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "name": "测试工程",
+  "classes": [
+    {
+      "name": "Small Car",
+      "color": "#aaaaff",
+      "hotkey": "1"
+    },
+    {
+      "name": "Truck",
+      "color": "#ffaaaa",
+      "hotkey": "2"
+    }
+  ],
+  "images": [],
+  "active_model": ""
+}

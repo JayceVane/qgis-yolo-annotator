@@ -1,0 +1,72 @@
+{
+  "version": "4.0.2",
+  "flags": {},
+  "checked": false,
+  "shapes": [
+    {
+      "label": "Bus",
+      "score": null,
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          9.0,
+          0.0
+        ],
+        [
+          9.0,
+          4.0
+        ],
+        [
+          0.0,
+          4.0
+        ]
+      ],
+      "group_id": null,
+      "description": "",
+      "difficult": false,
+      "shape_type": "rotation",
+      "flags": {},
+      "attributes": {},
+      "kie_linking": [],
+      "direction": 0.0
+    },
+    {
+      "label": "Van",
+      "score": null,
+      "points": [
+        [
+          1.0,
+          1.0
+        ],
+        [
+          9.0,
+          1.0
+        ],
+        [
+          9.0,
+          4.0
+        ],
+        [
+          1.0,
+          4.0
+        ]
+      ],
+      "group_id": null,
+      "description": "",
+      "difficult": false,
+      "shape_type": "rotation",
+      "flags": {},
+      "attributes": {},
+      "kie_linking": [],
+      "direction": 0.0
+    }
+  ],
+  "imagePath": "a.png",
+  "imageData": null,
+  "imageHeight": 50,
+  "imageWidth": 100,
+  "description": ""
+}
