@@ -320,7 +320,8 @@ class Controller(QObject):
             if layer.type() != Qgis.LayerType.Raster:
                 continue
             source = layer.source()
-            if not source.startswith("type=xyz"):
+            # 参数顺序不保证 type=xyz 在最前（如 crs=...&type=xyz&url=...）
+            if "type=xyz" not in source:
                 continue
             params = {}
             for segment in source.split("&"):
@@ -371,6 +372,24 @@ class Controller(QObject):
 
         return EPSG3857_WKT
 
+    def _rect_to_pixel_bbox(self, rect: QgsRectangle) -> list[float] | None:
+        """画布矩形 → 当前影像像素 bbox（clip 到影像范围）。
+
+        Returns:
+            [col0, row0, col1, row1]；与影像无交集时 None。
+        """
+        col0, row0 = self.raster.map_to_pixel(rect.xMinimum(), rect.yMaximum())
+        col1, row1 = self.raster.map_to_pixel(rect.xMaximum(), rect.yMinimum())
+        bbox = [
+            max(0.0, min(col0, col1)),
+            max(0.0, min(row0, row1)),
+            min(float(self.raster.width), max(col0, col1)),
+            min(float(self.raster.height), max(row0, row1)),
+        ]
+        if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+            return None
+        return bbox
+
     def add_scene_from_map(
         self, rect: QgsRectangle, target_res_m: float | None = None
     ) -> SceneDef | None:
@@ -400,23 +419,20 @@ class Controller(QObject):
             detected = self.detect_xyz_layer()
             if detected is not None:
                 return self._add_xyz_scene(rect, res, *detected)
-            if self.raster is None:
-                self.status_message.emit(
-                    "请先加载影像，或打开 QuickMapServices 在线图层后画场景"
-                )
-                return None
+            # 不落入文件分支：xyz 工作集下 raster 是虚拟网格，
+            # 拿它当影像换算会把场外矩形裁成 0 像素（误报「范围过小」）
+            self.status_message.emit(
+                "画布中未识别到在线 XYZ 图层，请先在 QuickMapServices 打开"
+            )
+            return None
         # ---- 文件影像分支
         if self.raster is None or self.current_image is None:
             self.status_message.emit("请先加载影像")
             return None
-        col0, row0 = self.raster.map_to_pixel(rect.xMinimum(), rect.yMaximum())
-        col1, row1 = self.raster.map_to_pixel(rect.xMaximum(), rect.yMinimum())
-        bbox = [
-            max(0.0, min(col0, col1)),
-            max(0.0, min(row0, row1)),
-            min(float(self.raster.width), max(col0, col1)),
-            min(float(self.raster.height), max(row0, row1)),
-        ]
+        bbox = self._rect_to_pixel_bbox(rect)
+        if bbox is None:
+            self.status_message.emit("场景范围与影像无交集，请画在影像范围内")
+            return None
         if bbox[2] - bbox[0] < _MIN_SCENE_PX or bbox[3] - bbox[1] < _MIN_SCENE_PX:
             self.status_message.emit("场景范围过小，已忽略")
             return None
@@ -750,14 +766,10 @@ class Controller(QObject):
         if self.raster is None or self.current_image is None:
             self.status_message.emit("请先加载影像")
             return False
-        col0, row0 = self.raster.map_to_pixel(rect.xMinimum(), rect.yMaximum())
-        col1, row1 = self.raster.map_to_pixel(rect.xMaximum(), rect.yMinimum())
-        bbox = [
-            max(0.0, min(col0, col1)),
-            max(0.0, min(row0, row1)),
-            min(float(self.raster.width), max(col0, col1)),
-            min(float(self.raster.height), max(row0, row1)),
-        ]
+        bbox = self._rect_to_pixel_bbox(rect)
+        if bbox is None:
+            self.status_message.emit("场景范围与影像无交集，请画在影像范围内")
+            return False
         if bbox[2] - bbox[0] < _MIN_SCENE_PX or bbox[3] - bbox[1] < _MIN_SCENE_PX:
             self.status_message.emit("场景范围过小，已忽略")
             return False
