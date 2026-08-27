@@ -18,6 +18,7 @@ from qgis.PyQt.QtWidgets import (
     QPushButton,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..export import converters

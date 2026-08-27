@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import unquote, urlparse, parse_qs
+from urllib.parse import unquote
 
 from qgis.core import (
     QgsApplication,
