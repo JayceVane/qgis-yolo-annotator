@@ -463,6 +463,7 @@ class ObbEditTool(QgsMapTool):
         layer = self.controller.ann_layer
         if layer is None:
             return
+        self.controller.ensure_annotation_editable()
         from .annotation_layer import shape_to_feature
 
         raster = self.controller.raster
@@ -486,6 +487,7 @@ class ObbEditTool(QgsMapTool):
         layer = self.controller.ann_layer
         if layer is None:
             return False
+        self.controller.ensure_annotation_editable()
         tolerance = self.canvas().mapSettings().mapUnitsPerPixel() * _HIT_RADIUS_PX
         if self._selected_fid is not None:
             hit = self._hit_handle(point, tolerance)
@@ -632,6 +634,7 @@ class ObbEditTool(QgsMapTool):
         fids = self._active_fids()
         if layer is None or not fids:
             return
+        self.controller.ensure_annotation_editable()
         attr_idx = layer.fields().indexOf("label")
         layer.beginEditCommand(f"改类别 → {label}")
         for fid in fids:
@@ -698,6 +701,7 @@ class ObbEditTool(QgsMapTool):
         fids = self._active_fids()
         if layer is None or not fids:
             return
+        self.controller.ensure_annotation_editable()
         layer.beginEditCommand(f"删除 {len(fids)} 个目标")
         for fid in fids:
             layer.deleteFeature(fid)
@@ -749,6 +753,7 @@ class ObbEditTool(QgsMapTool):
         layer = self.controller.ann_layer
         if layer is None or self._selected_fid is None:
             return
+        self.controller.ensure_annotation_editable()
         pts = self._feature_ring(layer.getFeature(self._selected_fid))
         pts = [_vadd(p, QgsPointXY(dx, dy)) for p in pts]
         layer.beginEditCommand("微调 OBB")

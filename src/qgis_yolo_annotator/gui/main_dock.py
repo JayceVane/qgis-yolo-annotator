@@ -859,6 +859,7 @@ class MainDock(QWidget):
         features = [shape_to_feature(s, raster) for s in shapes]
         if features:
             layer = controller.ann_layer
+            controller.ensure_annotation_editable()
             layer.beginEditCommand(f"推理结果 {scene_name}")  # 整批 = 一步撤销
             for feature in features:
                 layer.addFeature(feature)

@@ -625,6 +625,7 @@ class Controller(QObject):
             if label_path.is_file():
                 label_path.unlink()
                 removed = 1
+        self.ensure_annotation_editable()  # rollBack 会退出编辑会话，恢复之
         self._rebuild_scene_features()
         self.project.save()
         self.project_changed.emit()
@@ -667,6 +668,7 @@ class Controller(QObject):
         count = 0
         if self.ann_layer is not None and self.raster is not None:
             # 当前图层：编辑命令分组（单步撤销）
+            self.ensure_annotation_editable()
             attr_idx = self.ann_layer.fields().indexOf("label")
             matching = [
                 f.id()
@@ -720,6 +722,12 @@ class Controller(QObject):
         return self.batch_replace_label(old_name, new_name, project_wide=True)
 
     # ------------------------------------------------------------------ 撤销/重做
+
+    def ensure_annotation_editable(self) -> None:
+        """确保标注图层处于编辑会话（rollBack/场景删除等会退出编辑模式）。"""
+        layer = self.ann_layer
+        if layer is not None and not layer.isEditable():
+            layer.startEditing()
 
     def undo_annotation(self) -> bool:
         """撤销当前标注图层上一步操作（QGIS undo 栈）。
