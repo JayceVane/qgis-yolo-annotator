@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from qgis.core import (
+    Qgis,
     QgsCategorizedSymbolRenderer,
     QgsField,
     QgsFeature,
     QgsGeometry,
+    QgsPalLayerSettings,
     QgsRectangle,
     QgsRendererCategory,
     QgsSymbol,
+    QgsTextBufferSettings,
+    QgsTextFormat,
     QgsVectorLayer,
+    QgsVectorLayerSimpleLabeling,
 )
 from qgis.PyQt.QtCore import QVariant
 from qgis.PyQt.QtGui import QColor
@@ -52,7 +57,28 @@ def create_scene_layer(crs: str | None) -> QgsVectorLayer:
     )
     layer.updateFields()
     _apply_status_renderer(layer)
+    _apply_name_labeling(layer)
     return layer
+
+
+def _apply_name_labeling(layer: QgsVectorLayer) -> None:
+    """场景名标注：矩形中心显示 name（白字黑边，卫星影像上可读）。"""
+    settings = QgsPalLayerSettings()
+    settings.fieldName = "name"
+    settings.isExpression = False
+    settings.placement = Qgis.LabelPlacement.Horizontal
+    text_format = QgsTextFormat()
+    text_format.setSize(11)
+    text_format.setSizeUnit(Qgis.RenderUnit.Points)
+    text_format.setColor(QColor(255, 255, 255))
+    buffer = QgsTextBufferSettings()
+    buffer.setEnabled(True)
+    buffer.setSize(1.5)
+    buffer.setColor(QColor(0, 0, 0, 220))
+    text_format.setBuffer(buffer)
+    settings.setFormat(text_format)
+    layer.setLabeling(QgsVectorLayerSimpleLabeling(settings))
+    layer.setLabelsEnabled(True)
 
 
 def rebuild_scene_features(
