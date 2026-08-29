@@ -606,6 +606,37 @@ class Controller(QObject):
             return self.current_scene.name if self.current_scene else None
         return None
 
+    def ensure_scene_context(self) -> bool:
+        """确保存在可绘制的标注上下文（栅格网格已加载）。
+
+        xyz 场景未加载时自动加载上次（或首个）场景——绘制/标注均依赖
+        虚拟网格的像素↔地图换算，仅挂工作集不足以画框。
+
+        Returns:
+            是否已就绪（原本就绪或自动加载成功）。
+        """
+        if self.raster is not None:
+            return True
+        if self.project is None:
+            return False
+        entry = (
+            self.project.find_image(self.current_image)
+            if self.current_image
+            else None
+        )
+        if entry is None or entry.kind != "xyz":
+            entry = next((e for e in self.project.images if e.kind == "xyz"), None)
+        if entry is None or not entry.scenes:
+            return False
+        settings = QSettings()
+        last_scene = settings.value(_SETTING_LAST_SCENE, "", type=str)
+        scene = next(
+            (s for s in entry.scenes if s.name == last_scene), None
+        ) or entry.scenes[0]
+        self.load_scene(scene)
+        self.status_message.emit(f"已自动加载场景 {scene.name}（未推理也可直接画框）")
+        return True
+
     def set_scene_status(self, scene_name: str, status: str) -> None:
         """更新当前影像某场景状态并刷新。"""
         if self.project is None or self.current_image is None:

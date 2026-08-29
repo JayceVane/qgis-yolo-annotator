@@ -126,6 +126,16 @@ try:
     )
     print("用例 3 OK：过小范围被拒绝")
 
+    # ---- 用例 3.5：无网格状态（未推理/未加载场景）下 ensure_scene_context 自动恢复
+    ctrl.current_scene = None
+    if ctrl.raster is not None:
+        ctrl.raster.close()
+    ctrl.raster = None
+    assert ctrl.ensure_scene_context(), "ensure_scene_context 应自动加载场景"
+    assert ctrl.raster is not None and ctrl.current_scene is not None
+    assert ctrl.ann_layer.featureCount() == 1, "恢复后标注图层应载入迁移后 JSON"
+    print("用例 3.5 OK：无网格状态自动恢复场景上下文")
+
     # ---- 用例 4：文件影像场景（identity geotiff，像素=地图）
     import numpy as np
     from osgeo import gdal

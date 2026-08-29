@@ -604,11 +604,20 @@ class MainDock(QWidget):
     # ================================================================== 工具
 
     def _activate_obb_tool(self):
-        if self.controller.ann_layer is None:
+        if self.controller.project is None:
             self.iface.messageBar().pushMessage(
-                "YOLO Annotator", "请先在工程页双击影像加载", duration=3
+                "YOLO Annotator", "请先新建/打开工程", duration=3
             )
             return
+        if self.controller.ann_layer is None or self.controller.raster is None:
+            # 未推理/未加载场景时自动恢复场景上下文，而不是让画框静默失败
+            if not self.controller.ensure_scene_context():
+                self.iface.messageBar().pushMessage(
+                    "YOLO Annotator",
+                    "请先在工程树单击场景加载，或先添加场景",
+                    duration=4,
+                )
+                return
         self._obb_tool = ObbEditTool(
             self.iface.mapCanvas(),
             self.controller,

@@ -467,6 +467,12 @@ class ObbEditTool(QgsMapTool):
         from .annotation_layer import shape_to_feature
 
         raster = self.controller.raster
+        if raster is None:
+            # 无网格时像素换算必然失败：明确提示而非静默无反应
+            self.controller.status_message.emit(
+                "当前无已加载的场景网格，请先在工程树单击场景"
+            )
+            return
         pts_px = []
         for p in pts:
             col, row = raster.map_to_pixel(p.x(), p.y())
