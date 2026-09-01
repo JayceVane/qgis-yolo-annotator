@@ -18,7 +18,12 @@ from qgis.PyQt.QtCore import QObject, QSettings, pyqtSignal
 from ..core.inference import get_session
 from ..core.label_store import count_shapes_outside, shift_shapes
 from ..core.model_registry import ModelConfig, ModelRegistry
-from ..core.project import AnnotationProject, SceneDef
+from ..core.project import (
+    SCENE_STATUS_ANNOTATED,
+    SCENE_STATUS_UNANNOTATED,
+    AnnotationProject,
+    SceneDef,
+)
 from ..core.raster_io import RasterRef
 from ..core.xyz_source import (
     XyzRaster,
@@ -101,8 +106,15 @@ class Controller(QObject):
 
     # ------------------------------------------------------------------ 工程
 
+    def _reset_context(self) -> None:
+        """清空当前影像/场景上下文并移除画布上的旧图层（切换工程前调用）。"""
+        self._teardown_layers()
+        self.current_image = None
+        self.current_scene = None
+
     def create_project(self, root: str, name: str) -> None:
         """新建并打开工程。"""
+        self._reset_context()  # 旧工程的场景框/标注框不留在画布上
         self.project = AnnotationProject.create(root, name)
         QSettings().setValue(_SETTING_LAST_PROJECT, str(Path(root).resolve()))
         self.project_changed.emit()
@@ -110,6 +122,7 @@ class Controller(QObject):
 
     def open_project(self, root: str) -> None:
         """打开工程。"""
+        self._reset_context()
         self.project = AnnotationProject.open(root)
         QSettings().setValue(_SETTING_LAST_PROJECT, str(Path(root).resolve()))
         self.project_changed.emit()
@@ -304,6 +317,17 @@ class Controller(QObject):
             self.raster.height,
             scene_name=self.scene_label_scope(),
         )
+        # 手工绘制/编辑也推进状态：未标注场景一旦有标注即视为已标注
+        # （只升级不打折：已标注/已审核不被自动改回）
+        scope = self.scene_label_scope()
+        if (
+            shapes
+            and scope is not None
+            and self.current_scene is not None
+            and self.current_scene.name == scope
+            and self.current_scene.status == SCENE_STATUS_UNANNOTATED
+        ):
+            self.set_scene_status(scope, SCENE_STATUS_ANNOTATED)
         return True
 
     # ------------------------------------------------------------------ 场景

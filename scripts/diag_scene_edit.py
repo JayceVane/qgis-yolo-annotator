@@ -11,7 +11,12 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
-from qgis.core import QgsApplication, QgsCoordinateReferenceSystem, QgsRectangle
+from qgis.core import (
+    QgsApplication,
+    QgsCoordinateReferenceSystem,
+    QgsProject,
+    QgsRectangle,
+)
 
 app = QgsApplication([], False)
 app.initQgis()
@@ -157,6 +162,40 @@ try:
     # clip 到影像 200×100：bbox 应为 [20, 10, 150, 50]（行 10~50 = y 90~50）
     assert fscene.bbox == [20.0, 10.0, 150.0, 50.0], fscene.bbox
     print("用例 4 OK：文件场景 clip 正确")
+
+    # ---- 用例 5：手工画框落盘后场景状态联动（未标注→已标注，已审核不打回）
+    from qgis_yolo_annotator.core.project import (
+        SCENE_STATUS_ANNOTATED,
+        SCENE_STATUS_UNANNOTATED,
+        SCENE_STATUS_VERIFIED,
+    )
+
+    ctrl.load_scene(scene)  # 切回 xyz 场景
+    scene.status = SCENE_STATUS_UNANNOTATED
+    ctrl.save_current_labels()
+    assert scene.status == SCENE_STATUS_ANNOTATED, scene.status
+    scene.status = SCENE_STATUS_VERIFIED
+    ctrl.save_current_labels()
+    assert scene.status == SCENE_STATUS_VERIFIED, "已审核不应被自动降级"
+    print("用例 5 OK：手工标注联动场景状态（只升级不降级）")
+
+    # ---- 用例 6：新建工程后旧工程场景框/标注框从画布清空
+    from qgis_yolo_annotator.core.project import AnnotationProject as _AP
+
+    root2 = root.parent / "scene_edit_headless_2"
+    if root2.exists():
+        shutil.rmtree(root2)
+    ctrl.create_project(str(root2), "第二个工程")
+    assert ctrl.current_image is None and ctrl.current_scene is None
+    assert ctrl.ann_layer is None and ctrl.scene_layer is None
+    leftovers = [
+        layer.name()
+        for layer in QgsProject.instance().mapLayers().values()
+        if layer.name().startswith("yolo_annotator")
+    ]
+    assert not leftovers, f"旧图层残留: {leftovers}"
+    assert ctrl.project.name == "第二个工程"
+    print("用例 6 OK：新建工程清空旧工程画布图层")
 
     print("ALL OK")
 finally:
