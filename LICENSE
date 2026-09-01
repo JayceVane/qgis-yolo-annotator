@@ -1,0 +1,15 @@
+qgis_yolo_annotator — YOLO 智能标注 QGIS 插件
+Copyright (C) 2026 JayceVane
+
+本程序为自由软件，您可依据自由软件基金会发布的 GNU 通用公共许可证
+（第 2 版或更高版本）重新分发和/或修改它。
+
+本程序按"现状"发布，不含任何明示或暗示的担保。
+详见 GNU 通用公共许可证全文：
+https://www.gnu.org/licenses/gpl-2.0.html
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+https://www.gnu.org/licenses/gpl-2.0.html

@@ -6,8 +6,14 @@ version=0.2.1
 author=JayceVane
 email=jaycevane@example.com
 about=面向遥感影像的智能标注插件。加载 YOLO 系列 ONNX 模型（det/obb/seg）对 QGIS 中的 GeoTIFF 推理生成预标注，提供 OBB（旋转框）绘制与精修工具，支持导出 DOTA/VOC/YOLO-OBB 数据集（可配置输出分辨率 m/px 重采样），并内置标注工程管理（影像清单、类别、进度状态）。标注存储兼容 X-AnyLabeling JSON。
-tracker=https://example.com/t2_qgis_intelligent/issues
-repository=https://example.com/t2_qgis_intelligent
+
+外部依赖（需安装到 QGIS Python 环境，插件不含二进制）：
+pip install onnxruntime opencv-python-headless
+Windows 可用 QGIS 自带 pip：cmd /c "D:\QGIS\bin\python-qgis.bat -m pip install onnxruntime opencv-python-headless"。推理完全本地运行，不上传任何数据。
+homepage=https://github.com/JayceVane/qgis-yolo-annotator
+repository=https://github.com/JayceVane/qgis-yolo-annotator
+tracker=https://github.com/JayceVane/qgis-yolo-annotator/issues
+license=GPL-2.0-or-later
 tags=yolo,obb,dota,annotation,remote sensing,deep learning
 category=Plugins
 icon=icons/icon.png
