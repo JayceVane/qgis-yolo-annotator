@@ -1,8 +1,15 @@
 # qgis_yolo_annotator — QGIS 遥感影像 YOLO 智能标注插件
 
+[![QGIS 插件仓库](https://img.shields.io/badge/QGIS_Plugin_Repository-YOLO_Annotator-589632)](https://plugins.qgis.org/plugins/qgis_yolo_annotator/)
+[![GitHub Release](https://img.shields.io/github/v/release/JayceVane/qgis-yolo-annotator)](https://github.com/JayceVane/qgis-yolo-annotator/releases)
+[![License](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](LICENSE)
+
 面向 QGIS 4.x 的遥感影像智能标注工具：加载 YOLO 系列 ONNX 模型推理生成预标注，
 提供 OBB（旋转框）绘制与精修交互，按场景（AOI）管理标注进度，导出
 DOTA / VOC / YOLO-OBB 数据集（GeoTIFF 切片携带地理信息，支持指定输出地面分辨率重采样）。
+
+- **官方插件页**：<https://plugins.qgis.org/plugins/qgis_yolo_annotator/>（插件管理器内搜索 "YOLO Annotator" 即可安装）
+- **代码仓库**：<https://github.com/JayceVane/qgis-yolo-annotator>
 
 ## 功能总览
 
@@ -17,6 +24,13 @@ DOTA / VOC / YOLO-OBB 数据集（GeoTIFF 切片携带地理信息，支持指�
 | 工程管理 | project.json + labels/ 目录；影像清单（引用不拷贝）；批量导入；进度统计 |
 
 ## 安装
+
+**方式一（推荐）：QGIS 插件管理器在线安装**
+
+菜单 Plugins → 管理并安装插件 → 搜索 "**YOLO Annotator**" → 安装。
+（或从[官方插件页](https://plugins.qgis.org/plugins/qgis_yolo_annotator/)下载 zip 后「从 ZIP 安装」）
+
+**方式二：从源码部署（开发/抢先体验）**
 
 ```bat
 :: 1. 安装依赖到 QGIS Python（仅需一次）
