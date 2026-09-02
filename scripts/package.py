@@ -26,6 +26,10 @@ def main() -> None:
                 continue
             arcname = f"qgis_yolo_annotator/{path.relative_to(SRC).as_posix()}"
             zf.write(path, arcname)
+        license_path = ROOT / "LICENSE"
+        if license_path.is_file():
+            # plugins.qgis.org 要求包内含 LICENSE（仓库根为唯一权威副本）
+            zf.write(license_path, "qgis_yolo_annotator/LICENSE")
     print(f"packaged: {out}")
 
 
