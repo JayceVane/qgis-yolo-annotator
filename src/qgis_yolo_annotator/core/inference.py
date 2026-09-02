@@ -95,13 +95,16 @@ def _clip_convex(subject: np.ndarray, clip: np.ndarray) -> np.ndarray:
     """
     output = subject.astype(np.float64)
     m = len(clip)
+
+    def side(p):
+        # 内侧判定：叉积 >= 0（clip 顶点为逆/顺时针一致时统一成立）
+        return edge[0] * (p[1] - a[1]) - edge[1] * (p[0] - a[0])
+
     for i in range(m):
         if len(output) == 0:
             break
         a, b = clip[i], clip[(i + 1) % m]
         edge = b - a
-        # 内侧判定：叉积 >= 0（clip 顶点为逆/顺时针一致时统一成立）
-        side = lambda p: edge[0] * (p[1] - a[1]) - edge[1] * (p[0] - a[0])
         inside = np.array([side(p) >= 0 for p in output])
         input_pts = output
         output = []

@@ -30,3 +30,30 @@ else:
     if failed:
         raise SystemExit("发现未定义名称，请修复")
     print("undefined-name scan: clean")
+
+try:
+    import flake8 as _flake8_mod  # noqa: F401  仅探测是否安装
+except ImportError:
+    print("note: flake8 未安装，跳过风格扫描（pip install flake8 启用）")
+else:
+    import subprocess
+    import sys
+
+    # flake8 legacy API 在 Windows 下可能挂起，改走 CLI 子进程
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "flake8",
+            "--max-line-length=120",
+            "--extend-ignore=E203",
+            *[str(p) for p in sorted(SRC_ROOT.rglob("*.py"))],
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.stdout.strip():
+        print(result.stdout)
+        raise SystemExit("flake8 发现风格问题，请修复")
+    print("flake8: clean")

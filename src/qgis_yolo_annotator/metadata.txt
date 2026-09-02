@@ -2,7 +2,7 @@
 name=YOLO Annotator
 qgisMinimumVersion=4.0
 description=YOLO 智能标注：ONNX 推理预标注、OBB 手工精修、DOTA/VOC/YOLO-OBB 导出（GeoTIFF 切片带地理信息与分辨率重采样）、标注工程管理
-version=0.2.1
+version=0.2.2
 author=JayceVane
 email=JayceVane@163.com
 about=面向遥感影像的智能标注插件。加载 YOLO 系列 ONNX 模型（det/obb/seg）对 QGIS 中的 GeoTIFF 推理生成预标注，提供 OBB（旋转框）绘制与精修工具，支持导出 DOTA/VOC/YOLO-OBB 数据集（可配置输出分辨率 m/px 重采样），并内置标注工程管理（影像清单、类别、进度状态）。标注存储兼容 X-AnyLabeling JSON。外部依赖：需在 QGIS Python 环境安装 onnxruntime 与 opencv-python-headless（如 cmd /c "D:\QGIS\bin\python-qgis.bat -m pip install onnxruntime opencv-python-headless"）；推理完全本地运行，不上传任何数据。

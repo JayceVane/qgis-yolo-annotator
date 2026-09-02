@@ -84,7 +84,8 @@ class SceneDef:
         if self.status not in ALL_SCENE_STATUSES:
             raise ValueError(f"非法场景状态: {self.status}")
         if self.kind == "xyz":
-            if not self.map_bbox or len(self.map_bbox) != 4 or not (self.map_bbox[0] < self.map_bbox[2] and self.map_bbox[1] < self.map_bbox[3]):
+            bbox = self.map_bbox
+            if not bbox or len(bbox) != 4 or not (bbox[0] < bbox[2] and bbox[1] < bbox[3]):
                 raise ValueError(f"xyz 场景 map_bbox 非法: {self.map_bbox}")
             if self.zoom is None or self.source is None:
                 raise ValueError("xyz 场景需要 zoom 与 source 配置")

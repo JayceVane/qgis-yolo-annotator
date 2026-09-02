@@ -30,6 +30,7 @@ def _spawn_flags() -> int:
     """Windows 下隐藏子进程控制台窗口的 creationflags。"""
     return subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
+
 # 子进程导出脚本：路径/尺寸经 argv 传入（不以文本拼接进代码，杜绝引号注入）
 _EXPORT_SCRIPT = """
 import sys
@@ -206,8 +207,6 @@ def read_pt_metadata(pt_path: str | Path, python_exe: str | Path) -> dict:
             meta["task"] = line.split(":", 1)[1].strip() or None
         elif line.startswith("PT_META_NAMES:"):
             raw = line.split(":", 1)[1].strip()
-            import ast
-
             try:
                 parsed = ast.literal_eval(raw)
                 if isinstance(parsed, (list, tuple)):

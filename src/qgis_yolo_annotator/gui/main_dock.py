@@ -367,7 +367,7 @@ class MainDock(QWidget):
                 raster_ref = RasterRef.open(image_path)
             except (RuntimeError, OSError):
                 continue
-            entry = project.add_image(image_path)
+            project.add_image(image_path)
             if fmt == "yolo_obb":
                 shapes = import_yolo_obb(
                     label_path, raster_ref.width, raster_ref.height,

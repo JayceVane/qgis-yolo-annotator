@@ -192,7 +192,6 @@ def export_image(
     labels_dir.mkdir(parents=True, exist_ok=True)
 
     suffix = ".tif" if options.geo_tiff else ".png"
-    label_suffix = _LABEL_SUFFIX.get(options.format, ".txt")
     stem = raster.path.stem
     chip_count = 0
     label_count = 0
