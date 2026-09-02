@@ -426,7 +426,9 @@ class ObbEditTool(QgsMapTool):
             pass
 
     def _finish_draw(self, point: QgsPointXY):
-        assert self._p0 is not None and self._p1 is not None
+        if self._p0 is None or self._p1 is None:
+            self._reset_interaction()
+            return
         pts = self._obb_from_width(self._p0, self._p1, point)
         if _vlen(_vsub(pts[1], pts[0])) < 1e-6 or _vlen(_vsub(pts[3], pts[0])) < 1e-6:
             self._reset_interaction()

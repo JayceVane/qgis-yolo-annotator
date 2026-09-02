@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import ast
 import os
-import subprocess
+import subprocess  # nosec B404: pt→onnx 桥本身就依赖外部解释器子进程
 import sys
 from pathlib import Path
 
@@ -30,12 +30,27 @@ def _spawn_flags() -> int:
     """Windows 下隐藏子进程控制台窗口的 creationflags。"""
     return subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
-# 子进程导出脚本：打印结构化结果行供解析
+# 子进程导出脚本：路径/尺寸经 argv 传入（不以文本拼接进代码，杜绝引号注入）
 _EXPORT_SCRIPT = """
+import sys
 from ultralytics import YOLO
-model = YOLO(r"{pt_path}")
-path = model.export(format="onnx", imgsz={imgsz}, dynamic=False, half=False, simplify=True)
+
+model = YOLO(sys.argv[1])
+path = model.export(format="onnx", imgsz=int(sys.argv[2]), dynamic=False, half=False, simplify=True)
 print("EXPORT_RESULT:", path)
+"""
+
+# 权重元数据读取脚本：路径经 argv 传入
+_META_SCRIPT = """
+import sys
+from ultralytics import YOLO
+
+m = YOLO(sys.argv[1])
+names = m.model.names or {}
+items = sorted(names.items()) if isinstance(names, dict) else list(enumerate(names))
+print("PT_META_TASK:", m.task)
+print("PT_META_NAMES:", [v for _k, v in items])
+print("PT_META_IMGSZ:", getattr(m, "overrides", {}).get("imgsz"))
 """
 
 # 转换结果标记行（stdout 解析用）
@@ -71,8 +86,10 @@ def python_has_ultralytics(python_exe: Path) -> bool:
 
 def _has_ultralytics(python_exe: Path) -> bool:
     """检查解释器是否可 import ultralytics。"""
+    if not python_exe.is_file():
+        return False
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603: 本地已验证解释器，列表参数无 shell
             [str(python_exe), "-c", "import ultralytics"],
             capture_output=True,
             timeout=60,
@@ -128,9 +145,9 @@ def convert_pt_to_onnx(
 
         shutil.copy2(pt_path, local_pt)
 
-    script = _EXPORT_SCRIPT.format(pt_path=str(local_pt), imgsz=int(imgsz))
-    result = subprocess.run(
-        [str(python_exe), "-c", script],
+    script = _EXPORT_SCRIPT
+    result = subprocess.run(  # nosec B603: 解释器已验证存在，路径经 argv 传入无拼接
+        [str(python_exe), "-c", script, str(local_pt), str(int(imgsz))],
         capture_output=True,
         text=True,
         cwd=str(cache),
@@ -167,18 +184,14 @@ def read_pt_metadata(pt_path: str | Path, python_exe: str | Path) -> dict:
         {"task": str|None, "labels": list[str], "imgsz": int|None}；
         读取失败时字段为空，不抛异常。
     """
-    script = (
-        "from ultralytics import YOLO\n"
-        f"m = YOLO(r'{pt_path}')\n"
-        "names = m.model.names or {}\n"
-        "items = sorted(names.items()) if isinstance(names, dict) else list(enumerate(names))\n"
-        "print('PT_META_TASK:', m.task)\n"
-        "print('PT_META_NAMES:', [v for _k, v in items])\n"
-        "print('PT_META_IMGSZ:', getattr(m, 'overrides', {}).get('imgsz'))\n"
-    )
+    empty = {"task": None, "labels": [], "imgsz": None}
+    pt_path = Path(pt_path)
+    python_exe = Path(python_exe)
+    if not pt_path.is_file() or not python_exe.is_file():
+        return empty
     try:
-        result = subprocess.run(
-            [str(python_exe), "-c", script],
+        result = subprocess.run(  # nosec B603: 两者均已验证存在，路径经 argv 传入
+            [str(python_exe), "-c", _META_SCRIPT, str(pt_path)],
             capture_output=True,
             text=True,
             timeout=120,
@@ -186,7 +199,7 @@ def read_pt_metadata(pt_path: str | Path, python_exe: str | Path) -> dict:
             creationflags=_spawn_flags(),
         )
     except (subprocess.SubprocessError, OSError):
-        return {"task": None, "labels": [], "imgsz": None}
+        return empty
     meta = {"task": None, "labels": [], "imgsz": None}
     for line in result.stdout.splitlines():
         if line.startswith("PT_META_TASK:"):

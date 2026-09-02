@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import random
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405: 仅序列化写出 VOC XML，从不解析外部输入
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -321,7 +321,7 @@ def export_dataset(
         ValueError: 配置非法。
     """
     out_dir = Path(out_dir)
-    rng = random.Random(options.seed)
+    rng = random.Random(options.seed)  # nosec B311: 固定种子保证 train/val 划分可复现，非安全用途
     stats = ExportStats(image_count=len(image_jobs))
 
     done = 0

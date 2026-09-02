@@ -266,7 +266,8 @@ class Controller(QObject):
         重建 = 更换编辑上下文：先回滚编辑缓冲（JSON 已随每次操作落盘），
         再全量替换要素并清空撤销栈（跨场景撤销无意义）。
         """
-        assert self.project and self.raster and self.ann_layer and self.current_image
+        if not (self.project and self.raster and self.ann_layer and self.current_image):
+            raise RuntimeError("标注上下文未就绪，无法重建标注图层")
         layer = self.ann_layer
         if layer.isEditable():
             layer.rollBack()
@@ -285,7 +286,8 @@ class Controller(QObject):
 
     def _rebuild_scene_features(self) -> None:
         """从工程场景重建场景图层要素（raster 允许 None：xyz 场景不依赖）。"""
-        assert self.project and self.scene_layer and self.current_image
+        if not (self.project and self.scene_layer and self.current_image):
+            raise RuntimeError("工程上下文未就绪，无法重建场景图层")
         entry = self.project.find_image(self.current_image)
         if entry is not None:
             rebuild_scene_features(self.scene_layer, entry, self.raster)

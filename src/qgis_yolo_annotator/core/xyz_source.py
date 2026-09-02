@@ -16,6 +16,7 @@ import math
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 import cv2
 import numpy as np
@@ -98,7 +99,8 @@ class TileCache:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _path_for(self, url: str) -> Path:
-        digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:24]
+        # 仅作本地缓存文件名（非安全用途）；sha1 已够且最短
+        digest = hashlib.sha1(url.encode("utf-8"), usedforsecurity=False).hexdigest()[:24]
         return self.root / f"{digest}.png"
 
     def get(self, url: str) -> np.ndarray | None:
@@ -114,10 +116,13 @@ class TileCache:
         return data
 
     def _download(self, url: str) -> np.ndarray | None:
+        # 瓦片源只允许 http(s)，杜绝 file:/自定义 scheme 被 urlopen 展开
+        if urlparse(url).scheme not in ("http", "https"):
+            return _EMPTY_TILE
         for _attempt in range(_DOWNLOAD_RETRIES):
             try:
                 request = urllib.request.Request(url, headers=_HEADERS)
-                with urllib.request.urlopen(request, timeout=30) as resp:
+                with urllib.request.urlopen(request, timeout=30) as resp:  # nosec B310: 入口已限定 http(s)
                     payload = resp.read()
                 tile = cv2.imdecode(np.frombuffer(payload, np.uint8), cv2.IMREAD_COLOR)
                 if tile is not None:

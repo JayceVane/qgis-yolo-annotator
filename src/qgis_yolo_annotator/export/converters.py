@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405: 仅序列化写出 VOC XML，从不解析外部输入
 from typing import Sequence
 
 BOUNDARY_CLIP = "clip"
