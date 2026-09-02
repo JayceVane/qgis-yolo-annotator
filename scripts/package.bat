@@ -1,18 +1,8 @@
 @echo off
-rem 打包插件 zip（版本号取自 metadata.txt，产物 dist/qgis_yolo_annotator-<ver>.zip）
+rem 打包插件 zip（调 scripts/package.py，产物 dist/qgis_yolo_annotator-<ver>.zip）
 setlocal
-set PLUGIN_NAME=qgis_yolo_annotator
-set STAGE=%TEMP%\%PLUGIN_NAME%_pkg
-for /f "tokens=2 delims==" %%v in ('findstr /b "version=" "%~dp0..\src\%PLUGIN_NAME%\metadata.txt"') do set VER=%%v
-set OUT=%~dp0..\dist\%PLUGIN_NAME%-%VER%.zip
-
-if exist "%STAGE%" rmdir /s /q "%STAGE%"
-mkdir "%STAGE%"
-xcopy /e /i /y "%~dp0..\src\%PLUGIN_NAME%" "%STAGE%\%PLUGIN_NAME%" >nul
-del /s /q "%STAGE%\%PLUGIN_NAME%\__pycache__" 2>nul
-for /d /r "%STAGE%" %%d in (__pycache__) do rmdir /s /q "%%d" 2>nul
-
-if not exist "%~dp0..\dist" mkdir "%~dp0..\dist"
-powershell -Command "Compress-Archive -Path '%STAGE%\*' -DestinationPath '%OUT%' -Force"
-echo packaged: %OUT%
+set HERE=%~dp0..
+for /f "tokens=*" %%p in ('dir /b /s "D:\Tools\QGIS\bin\python-qgis.bat" 2^>nul') do set QGIS_PY=%%p
+if "%QGIS_PY%"=="" set QGIS_PY=D:\Tools\QGIS\bin\python-qgis.bat
+call "%QGIS_PY%" "%~dp0package.py"
 endlocal
